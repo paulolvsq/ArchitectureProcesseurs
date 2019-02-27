@@ -1,8 +1,0 @@
-entity RCA_additionneur is
-
-  port(
-    signal OPA : in  bit_vector(31 downto 0);
-    signal OPB : in  bit_vector(31 downto 0);
-    signal SUM : out bit_vector(31 downto 0)
-    );
-
