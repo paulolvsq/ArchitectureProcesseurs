@@ -1,0 +1,32 @@
+entity RCA_additionneur is
+
+  port(
+    signal OPA  : in  bit_vector(31 downto 0);
+    signal OPB  : in  bit_vector(31 downto 0);
+    signal SUM  : out bit_vector(31 downto 0);
+    signal S_OF : out bit;
+    signal U_OF : out bit
+    );
+
+end;
+
+architecture RCA of RCA_additionneur is
+
+  signal CRY : bit_vector(31 downto 0);
+  signal CIN : bit_vector(31 downto 0);
+
+begin
+
+  CRY <= (OPA and OPB) or
+         (OPA and CIN) or
+	 (CIN and OPB);
+
+  SUM <= CIN xor OPA xor OPB;
+
+  CIN <= CRY (30 downto 0) & '0' ;
+
+  U_OF <= CRY(31);
+
+  S_OF <= CRY(30) xor CRY(31);
+
+end RCA;

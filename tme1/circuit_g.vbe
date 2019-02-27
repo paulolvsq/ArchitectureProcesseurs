@@ -1,0 +1,19 @@
+entity circuit_g is
+
+       port(	   signal a	 : in  bit;
+       		   signal b   	 : in  bit;
+       		   signal c   	 : in  bit;
+		   signal d   	 : in  bit;
+		   signal output : out bit
+		   );
+
+end circuit_g;
+
+architecture fun_g of circuit_g is
+
+begin
+
+	output <= (b and c and d) or ((not b) and (not a) and (not d));
+
+end fun_g;
+

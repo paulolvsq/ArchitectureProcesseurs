@@ -1,0 +1,19 @@
+entity circuit_h is
+
+       port(	   signal a	 : in  bit;
+       		   signal b   	 : in  bit;
+       		   signal c   	 : in  bit;
+		   signal d   	 : in  bit;
+		   signal output : out bit
+		   );
+
+end circuit_h;
+
+architecture fun_h of circuit_h is
+
+begin
+
+	output <= a xor b xor c xor d;
+
+end fun_h;
+
