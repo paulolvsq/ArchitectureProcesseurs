@@ -1,0 +1,26 @@
+entity CLA_32 is 
+	
+	port(
+            signal OPA  : in  bit_vector(31 downto 0);
+            signal OPB  : in  bit_vector(31 downto 0);
+            signal SUM  : out bit_vector(31 downto 0);
+            signal S_OF : out bit;
+            signal C_OF : out bit
+    );
+
+end CLA_32
+
+architecture CLA of CLA_32 is
+
+	signal PO : bit_vector(31 downto 0);
+	signal GO : bit_vector(31 downto 0);
+
+begin
+	
+	PO <= OPA xor OPB;
+	GO <= OPA and OPB;
+
+	P1 <= P0 and P0(30 downto 0) & '1';
+	P2 <= P1 and P1(30 downto 0) & '11';
+	P3 <= P2 and 
+
