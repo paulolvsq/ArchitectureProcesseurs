@@ -1,6 +1,6 @@
 .text :
 
-	strlen : 
+	strlen :
 		ori $2 $0 0
 	while :
 		lb $5 0($4)
