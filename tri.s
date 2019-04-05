@@ -4,7 +4,7 @@ tableau : .word 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
 size : .word 10
 
 .text :
-	
+
 partition :
 
 	ori 	$3 	$4 	0 #deuxieme index
