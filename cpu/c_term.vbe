@@ -1,0 +1,28 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: c_term.vbe						#
+-- # date	: Nov 10 1995						#
+-- # content	: a terminal						#
+-- # author	: Pirouz Bazargan Sabet					#
+-- ### -------------------------------------------------------------- ###
+
+entity C_TERM is
+
+  port (
+       signal E_N : in    bit_vector (  3 downto 0)    ;-- chip select
+       signal W_N : in    bit                          ;-- write enable
+       signal DAT : in    bit_vector ( 31 downto 0)    ;-- data
+
+       signal VDD : in    bit                          ;
+       signal VSS : in    bit
+       );
+
+end C_TERM;
+
+	-- ### ------------------------------------------------------ ###
+	-- #  C architecture (See c_term.c file)			#
+	-- ### ------------------------------------------------------ ###
+
+architecture C of C_TERM is
+begin
+end ;

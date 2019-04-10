@@ -1,0 +1,398 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: mips_32_m_dec.vbe					#
+-- # date	: Nov 12 1999						#
+-- # version	: v1.0							#
+-- # descr.	: data flow description of an address decoder for a	#
+-- #		  simple scalar microprogrammed Mips_32 CPU board	#
+-- #									#
+-- # author	: Pirouz Bazargan Sabet					#
+-- ### -------------------------------------------------------------- ###
+
+entity MIPS_32_M_DEC is
+
+  port (
+       signal CK             : in    bit                           ;
+       signal RESET_N        : in    bit                           ;
+
+       signal D_A            : in    bit_vector ( 31 downto 2)     ;
+       signal D_BYTSEL       : in    bit_vector (  3 downto 0)     ;
+       signal D_RQ           : in    bit                           ;
+       signal D_RW           : in    bit                           ;
+       signal D_MODE         : in    bit_vector (  1 downto 0)     ;
+       signal D_SYNC         : in    bit                           ;
+       signal D_REG          : in    bit                           ;
+       signal D_LINKED       : in    bit                           ;
+       signal D_RSTLKD       : in    bit                           ;
+       signal D_RBERR        : out   bit                           ;
+       signal D_WBERR        : out   bit                           ;
+       signal D_ACCPT        : out   bit                           ;
+       signal D_OUT          : out   bit_vector ( 31 downto 0)     ;
+       signal D_IN           : in    bit_vector ( 31 downto 0)     ;
+       signal D_ACK          : in    bit                           ;
+
+       signal RAM_ADR0       : out   bit_vector ( 11 downto  2)    ;
+       signal RAM_DAT0       : inout mux_vector ( 31 downto  0) bus;
+       signal RAM_RW0        : out   bit                           ;
+
+       signal E_00400000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10001000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10002000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_7FFFD000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_80000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_BFC00000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_C0000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_C0001000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_COP2_REG_N   : out   bit_vector (  3 downto  0)    ;
+
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit
+       );
+
+end MIPS_32_M_DEC;
+
+-- ### -------------------------------------------------------------- ###
+-- #   internal description - contains the following sections:		#
+-- #									#
+-- #     - internal signal and register declarations			#
+-- #     - constant declarations					#
+-- #     - signals and registers descriptions				#
+-- #									#
+-- #   Each signal or register is suffixed by two letters.		#
+-- #   The first letter identifies the type of the signal :		#
+-- #     - R : a register sampling on the clock's rising  edge		#
+-- #     - F : a register sampling on the clock's falling edge		#
+-- #     - S : a signal							#
+-- #									#
+-- #   The second letter is X						#
+-- ### -------------------------------------------------------------- ###
+
+architecture BEHAVIOURAL of MIPS_32_M_DEC is
+
+  signal CK_SX           : bit                                ;-- internal clock
+
+  signal D_RW_SX         : bit                                ;-- eff read/write
+
+  signal D_RQ_SX         : bit                                ;-- eff rqst
+  signal LKD_RQ_SX       : bit                                ;-- eff rqst
+  signal SYNC_RQ_SX      : bit                                ;-- eff rqst
+  signal XREG_RQ_SX      : bit                                ;-- ram select
+
+  signal LKDADR_RX       : reg_vector ( 31 downto  2) register;-- link addr
+  signal LKDPND_RX       : reg_bit                    register;-- link pending
+  signal LKDSTOR_SX      : bit                                ;-- link store
+  signal CMPLKDA_SX      : bit_vector ( 31 downto  2)         ;-- cmp link adr
+  signal EQLLKDA_SX      : bit                                ;-- eql link adr
+  signal LKDFLG_SX       : bit_vector ( 31 downto  0)         ;-- sc   flag
+
+  signal D_BYTSEL_SX     : bit_vector (  3 downto  0)         ;-- byte select
+
+  signal D_00400000_SX   : bit                                ;-- ram select
+  signal D_10000000_SX   : bit                                ;-- ram select
+  signal D_10001000_SX   : bit                                ;-- ram select
+  signal D_10002000_SX   : bit                                ;-- ram select
+  signal D_7FFFD000_SX   : bit                                ;-- ram select
+  signal D_80000000_SX   : bit                                ;-- ram select
+  signal D_BFC00000_SX   : bit                                ;-- ram select
+  signal D_C0000000_SX   : bit                                ;-- ram select
+  signal D_C0001000_SX   : bit                                ;-- ram select
+
+  signal E_00400000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_10000000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_10001000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_10002000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_7FFFD000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_80000000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_BFC00000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_C0000000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_C0001000_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+  signal E_COP2_REG_SX   : bit_vector (  3 downto  0)         ;-- ram enable
+
+  signal E_00400000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_10000000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_10001000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_10002000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_7FFFD000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_80000000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_BFC00000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_C0000000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_C0001000_FX   : reg_vector (  3 downto  0) register;-- ram enable
+  signal E_COP2_REG_FX   : reg_vector (  3 downto  0) register;-- ram enable
+
+  signal RAM_ADR0_SX     : bit_vector ( 31 downto  2)         ;
+  signal RAM_ADR0_FX     : reg_vector ( 31 downto  2) register;
+
+  signal RAM_RW0_SX      : bit                                ;
+  signal RAM_RW0_FX      : reg_bit                    register;
+
+  signal DFRMIPS_FX      : reg_vector ( 31 downto  0) register;
+
+  signal ENABLE_SX       : bit                                ;
+  signal ENABLE_RX       : reg_bit                    register;
+  signal ENABLE_FX       : reg_bit                    register;
+
+  signal RESET_RX        : reg_bit                    register;
+  signal RESET_SX        : bit                                ;
+
+begin
+
+	-- ### ------------------------------------------------------ ###
+	-- #   internal clock						#
+	-- ### ------------------------------------------------------ ###
+
+CK_SX      <= CK      ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   internal reset						#
+	-- ### ------------------------------------------------------ ###
+
+RESET_SX   <= RESET_RX or not RESET_N;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   effective request					#
+	-- #     - data access						#
+	-- #     - linked data access					#
+	-- #     - synchrnoize operation				#
+	-- #     - processor's external registers access		#
+	-- ### ------------------------------------------------------ ###
+
+D_RQ_SX    <= D_RQ and not (D_REG or D_SYNC or D_RSTLKD             );
+LKD_RQ_SX  <= D_RQ and     (                   D_RSTLKD or D_LINKED );
+SYNC_RQ_SX <= D_RQ and               D_SYNC                          ;
+XREG_RQ_SX <= D_RQ and      D_REG                                    ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   linked store						#
+	-- ### ------------------------------------------------------ ###
+
+LKDSTOR_SX <= D_RQ and D_LINKED  and not D_RW;
+
+CMPLKDA_SX <= D_A  xor LKDADR_RX ;
+
+EQLLKDA_SX <= LKDPND_RX         when (CMPLKDA_SX = (X"0000000" & "00")) else
+              '0'               ;
+LKDFLG_SX  <= X"00000001"       when (EQLLKDA_SX =   '1'              ) else
+              X"00000000"       ;
+
+D_RW_SX    <= not LKDFLG_SX (0) when (LKDSTOR_SX =   '1'              ) else
+              D_RW              ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   byte select						#
+	-- ### ------------------------------------------------------ ###
+
+D_BYTSEL_SX <= D_BYTSEL;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   select ram blocs depending on the data address		#
+	-- #   (each bloc : 4 K-byte) :					#
+	-- #								#
+	-- #     0040 0000   to   0040 0fff : ram - (user   text )	#
+	-- #     1000 0000   to   1000 0fff : ram - (user   data )	#
+	-- #     1000 1000   to   1000 1fff : ram - (user   data )	#
+	-- #     1000 2000   to   1000 2fff : ram - (controllers )	#
+	-- #     7fff d000   to   7fff dfff : ram - (user   stack)	#
+	-- #     8000 0000   to   8000 0fff : ram - (exc    text )	#
+	-- #     bfc0 0000   to   bfc0 0fff : ram - (boot   text )	#
+	-- #     c000 0000   to   c000 0fff : ram - (kernel data )	#
+	-- #     c000 1000   to   c000 1fff : ram - (tty         )	#
+	-- ### ------------------------------------------------------ ###
+
+D_00400000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"0040_0") else '0';
+D_10000000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"1000_0") else '0';
+D_10001000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"1000_1") else '0';
+D_10002000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"1000_2") else '0';
+D_7FFFD000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"7fff_d") else '0';
+D_80000000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"8000_0") else '0';
+D_BFC00000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"bfc0_0") else '0';
+D_C0000000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"c000_0") else '0';
+D_C0001000_SX <= D_RQ_SX when (D_A (31 downto 12) = X"c000_1") else '0';
+
+	-- ### ------------------------------------------------------ ###
+	-- #   ram enable - 1 bit per byte				#
+	-- ### ------------------------------------------------------ ###
+
+E_00400000_SX  <= D_BYTSEL_SX when (D_00400000_SX = '1') else
+                  "0000"      ;
+
+E_10000000_SX  <= D_BYTSEL_SX when (D_10000000_SX = '1') else
+                  "0000"      ;
+
+E_10001000_SX  <= D_BYTSEL_SX when (D_10001000_SX = '1') else
+                  "0000"      ;
+
+E_10002000_SX  <= D_BYTSEL_SX when (D_10002000_SX = '1') else
+                  "0000"      ;
+
+E_7FFFD000_SX  <= D_BYTSEL_SX when (D_7FFFD000_SX = '1') else
+                  "0000"      ;
+
+E_80000000_SX  <= D_BYTSEL_SX when (D_80000000_SX = '1') else
+                  "0000"      ;
+
+E_BFC00000_SX  <= D_BYTSEL_SX when (D_BFC00000_SX = '1') else
+                  "0000"      ;
+
+E_C0000000_SX  <= D_BYTSEL_SX when (D_C0000000_SX = '1') else
+                  "0000"      ;
+
+E_C0001000_SX  <= D_BYTSEL_SX when (D_C0001000_SX = '1') else
+                  "0000"      ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   coprocessor's registers enable				#
+	-- ### ------------------------------------------------------ ###
+
+E_COP2_REG_SX  <= D_BYTSEL_SX when (XREG_RQ_SX    = '1') else
+                  "0000"     ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   ram address						#
+	-- ### ------------------------------------------------------ ###
+
+RAM_ADR0_SX    <= D_A         ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   ram access type - read-write				#
+	-- ### ------------------------------------------------------ ###
+
+RAM_RW0_SX     <= D_RW_SX     ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   ram enable enable					#
+	-- ### ------------------------------------------------------ ###
+
+ENABLE_SX  <= not RESET_SX when ((ENABLE_RX xor ENABLE_FX) = '0') else '0';
+
+	-- ### ------------------------------------------------------ ###
+	-- #   registers :						#
+	-- #     ram signals are clocked on the falling edge of the	#
+	-- #     clock to avoid unstabilities at the beginning of the	#
+	-- #     clock cycle						#
+	-- ### ------------------------------------------------------ ###
+
+REQUEST : block (CK_SX = '0' and not CK_SX'STABLE)
+begin
+
+  RAM_ADR0_FX   <= guarded RAM_ADR0_SX   ;
+
+  RAM_RW0_FX    <= guarded RAM_RW0_SX    ;
+
+  DFRMIPS_FX    <= guarded D_IN          ;
+
+  E_00400000_FX <= guarded E_00400000_SX ;
+  E_10000000_FX <= guarded E_10000000_SX ;
+  E_10001000_FX <= guarded E_10001000_SX ;
+  E_10002000_FX <= guarded E_10002000_SX ;
+  E_7FFFD000_FX <= guarded E_7FFFD000_SX ;
+  E_80000000_FX <= guarded E_80000000_SX ;
+  E_BFC00000_FX <= guarded E_BFC00000_SX ;
+  E_C0000000_FX <= guarded E_C0000000_SX ;
+  E_C0001000_FX <= guarded E_C0001000_SX ;
+  E_COP2_REG_FX <= guarded E_COP2_REG_SX ;
+
+  ENABLE_FX     <= guarded ENABLE_RX     ;
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   registers :						#
+	-- #     - linked load register					#
+	-- ### ------------------------------------------------------ ###
+
+LINKED : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+  LKDADR_RX <= guarded D_A       when (LKD_RQ_SX = '1' and D_RW     = '1') else
+                       LKDADR_RX ;
+
+  LKDPND_RX <= guarded '0'       when (RESET_SX  = '1'                   ) else
+                       '0'       when (LKD_RQ_SX = '1' and D_RSTLKD = '1') else
+                       '1'       when (LKD_RQ_SX = '1' and D_RW     = '1') else
+                       LKDPND_RX ;
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   misc :							#
+	-- #     reset register						#
+	-- #     enable register					#
+	-- ### ------------------------------------------------------ ###
+
+MISCELANEOUS : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+  RESET_RX  <= guarded not RESET_N   ;
+  ENABLE_RX <= guarded not ENABLE_RX when (RESET_SX = '0') else '0';
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : ram signals				#
+	-- ### ------------------------------------------------------ ###
+
+RAM_ADR0 <= RAM_ADR0_FX (11 downto 2);
+
+RAM_RW0  <= RAM_RW0_FX               ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : ram signals				#
+	-- ### ------------------------------------------------------ ###
+
+RAM_DATA_0 : block (RAM_RW0_FX = '0')
+begin
+  RAM_DAT0 <= guarded DFRMIPS_FX;
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : ram signals				#
+	-- ### ------------------------------------------------------ ###
+
+E_00400000_N <= not E_00400000_FX when (ENABLE_SX = '1') else "1111" ;
+E_10000000_N <= not E_10000000_FX when (ENABLE_SX = '1') else "1111" ;
+E_10001000_N <= not E_10001000_FX when (ENABLE_SX = '1') else "1111" ;
+E_10002000_N <= not E_10002000_FX when (ENABLE_SX = '1') else "1111" ;
+E_7FFFD000_N <= not E_7FFFD000_FX when (ENABLE_SX = '1') else "1111" ;
+E_80000000_N <= not E_80000000_FX when (ENABLE_SX = '1') else "1111" ;
+E_BFC00000_N <= not E_BFC00000_FX when (ENABLE_SX = '1') else "1111" ;
+E_C0000000_N <= not E_C0000000_FX when (ENABLE_SX = '1') else "1111" ;
+E_C0001000_N <= not E_C0001000_FX when (ENABLE_SX = '1') else "1111" ;
+E_COP2_REG_N <= not E_COP2_REG_FX when (ENABLE_SX = '1') else "1111" ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : processor signals			#
+	-- #     - bus errors when the address is out of the space	#
+	-- #       covered by the decoder				#
+	-- ### ------------------------------------------------------ ###
+
+D_RBERR <= D_RQ_SX and D_RW     when (D_00400000_SX = '0' and
+                                      D_10000000_SX = '0' and
+                                      D_10001000_SX = '0' and
+                                      D_10002000_SX = '0' and
+                                      D_7FFFD000_SX = '0' and
+                                      D_80000000_SX = '0' and
+                                      D_BFC00000_SX = '0' and
+                                      D_C0000000_SX = '0' and
+                                      D_C0001000_SX = '0'    ) else
+           '0'                  ;
+
+D_WBERR <= D_RQ_SX and not D_RW when (D_00400000_SX = '0' and
+                                      D_10000000_SX = '0' and
+                                      D_10001000_SX = '0' and
+                                      D_10002000_SX = '0' and
+                                      D_7FFFD000_SX = '0' and
+                                      D_80000000_SX = '0' and
+                                      D_BFC00000_SX = '0' and
+                                      D_C0000000_SX = '0' and
+                                      D_C0001000_SX = '0'    ) else
+           '0'                  ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : processor signals			#
+	-- ### ------------------------------------------------------ ###
+
+D_OUT   <= LKDFLG_SX when (LKDSTOR_SX    = '1'   ) else
+           RAM_DAT0  ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs : processor signals			#
+	-- ### ------------------------------------------------------ ###
+
+D_ACCPT <= '1' ;
+end ;

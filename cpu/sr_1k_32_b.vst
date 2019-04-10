@@ -1,0 +1,80 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: sr_1k_32_b.vst					#
+-- # date	: Nov 10 1995						#
+-- # descr.	: a static ram of 1k words of 32 bits with :		#
+-- #		   - 4 negative logic chip select pin (1 per byte)	#
+-- #									#
+-- # author	: P. Bazargan Sabet					#
+-- ### -------------------------------------------------------------- ###
+
+entity SR_1K_32_B is
+
+  port (
+       signal E_N         : in    bit_vector ( 3 downto 0)    ;
+       signal W_N         : in    bit                         ;
+       signal DAT         : inout mux_vector (31 downto 0) bus;
+       signal ADR         : in    bit_vector ( 9 downto 0)    ;
+
+       signal VDD         : in    bit                         ;
+       signal VSS         : in    bit
+       );
+
+end SR_1K_32_B;
+
+architecture STRUCTURAL of SR_1K_32_B is
+
+  component C_SR1K_8B
+  port (
+       signal E_N         : in    bit                         ;
+       signal W_N         : in    bit                         ;
+       signal DAT         : inout mux_vector ( 7 downto 0) bus;
+       signal ADR         : in    bit_vector ( 9 downto 0)    ;
+       signal VDD         : in    bit                         ;
+       signal VSS         : in    bit
+       );
+  end component;
+  
+begin
+
+  BYTE_00000003_3 : C_SR1K_8B
+  port map(
+          E_N => E_N (           3) ,
+          W_N => W_N                ,
+          DAT => DAT (31 downto 24) ,
+          ADR => ADR                ,
+          VDD => VDD                ,
+          VSS => VSS
+          );
+
+  BYTE_00000003_2 : C_SR1K_8B
+  port map(
+          E_N => E_N (           2) ,
+          W_N => W_N                ,
+          DAT => DAT (23 downto 16) ,
+          ADR => ADR                ,
+          VDD => VDD                ,
+          VSS => VSS
+          );
+
+  BYTE_00000003_1 : C_SR1K_8B
+  port map(
+          E_N => E_N (           1) ,
+          W_N => W_N                ,
+          DAT => DAT (15 downto  8) ,
+          ADR => ADR                ,
+          VDD => VDD                ,
+          VSS => VSS
+          );
+
+  BYTE_00000003_0 : C_SR1K_8B
+  port map(
+          E_N => E_N (           0) ,
+          W_N => W_N                ,
+          DAT => DAT ( 7 downto  0) ,
+          ADR => ADR                ,
+          VDD => VDD                ,
+          VSS => VSS
+          );
+
+end ;

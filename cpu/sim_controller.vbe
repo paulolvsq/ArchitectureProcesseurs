@@ -1,0 +1,124 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: sim_controller.vbe					#
+-- # date	: Dec 13 1999						#
+-- # version	: v0.0							#
+-- #									#
+-- # origin	: this description has been developed by the ASIM team	#
+-- #		  at LIP6 laboratory, University Pierre et Marie Curie	#
+-- #		  4 Place Jussieu 75252 Paris Cedex 05 - France		#
+-- #									#
+-- # descr.	: simulation controller					#
+-- #									#
+-- # authors	: Pirouz Bazargan Sabet					#
+-- ### -------------------------------------------------------------- ###
+
+entity SIM_CONTROLLER is
+
+  port (
+       signal CK      : in    bit                         ;-- external clock
+       signal RESET_N : in    bit                         ;-- reset
+
+       signal E_N     : in    bit_vector ( 3 downto 0)    ;-- chip select
+       signal W_N     : in    bit                         ;-- write enable
+       signal DAT     : inout mux_vector (31 downto 0) bus;-- data
+       signal ADR     : in    bit_vector ( 9 downto 0)    ;-- address
+
+       signal VDD     : in    bit                         ;
+       signal VSS     : in    bit
+       );
+
+end SIM_CONTROLLER;
+--
+
+architecture BEHAVIOURAL of SIM_CONTROLLER is
+
+  signal CK_SX        : bit                               ;-- internal clk
+
+  signal STATUS_RX    : reg_vector (  7 downto 0) register;
+
+  signal GOOD_SX      : bit                               ;
+  signal BAD_SX       : bit                               ;
+  signal EXCEPT_SX    : bit                               ;
+  signal BOOTX_SX     : bit                               ;
+  signal EXIT_SX      : bit                               ;
+
+  constant s_good     : bit_vector (  7 downto 0) := X"01";
+  constant s_bad      : bit_vector (  7 downto 0) := X"02";
+  constant s_except   : bit_vector (  7 downto 0) := X"04";
+  constant s_bootexc  : bit_vector (  7 downto 0) := X"08";
+  constant s_exit     : bit_vector (  7 downto 0) := X"10";
+
+begin
+--
+
+	-- ### ------------------------------------------------------ ###
+	-- #   check power supplies					#
+	-- ### ------------------------------------------------------ ###
+
+CHECK_POWER : assert  ((VDD = '1') and (VSS = '0'))
+              report  "missing power supply on the PI SIM controller"
+              severity WARNING;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   internal clock						#
+	-- ### ------------------------------------------------------ ###
+
+CK_SX   <= CK;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   detect end of simulation					#
+	-- ### ------------------------------------------------------ ###
+
+GOOD_SX    <= '1' when (STATUS_RX = s_good   ) else '0' ;
+BAD_SX     <= '1' when (STATUS_RX = s_bad    ) else '0' ;
+EXCEPT_SX  <= '1' when (STATUS_RX = s_except ) else '0' ;
+BOOTX_SX   <= '1' when (STATUS_RX = s_bootexc) else '0' ;
+EXIT_SX    <= '1' when (STATUS_RX = s_exit   ) else '0' ;
+
+SIMU_GOOD : assert (GOOD_SX   = '0')
+            report "functional test GOOD"
+            severity ERROR;
+
+SIMU_BAD  : assert (BAD_SX    = '0')
+            report "functional test BAD"
+            severity ERROR;
+
+SIMU_EXC  : assert (EXCEPT_SX = '0')
+            report "unexpected exception"
+            severity ERROR;
+
+SIMU_BTX  : assert (BOOTX_SX  = '0')
+            report "unexpected exception during reset"
+            severity ERROR;
+
+SIMU_EXIT : assert (EXIT_SX   = '0')
+            report "simulation ends on exit"
+            severity ERROR;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   write the controller's status				#
+	-- ### ------------------------------------------------------ ###
+
+WRITE_STATUS : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  STATUS_RX <= guarded
+               X"00"              when (RESET_N = '0'              ) else
+               DAT   (7 downto 0) when (E_N (0) = '0' and W_N = '0') else
+               STATUS_RX          ;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   read the controller's status				#
+	-- ### ------------------------------------------------------ ###
+
+READ_STATUS : block (CK_SX = '0' and E_N (0) = '0' and W_N = '1')
+begin
+
+  DAT <= guarded X"000000" & STATUS_RX;
+
+end block;
+
+end BEHAVIOURAL;

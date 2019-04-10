@@ -12,9 +12,9 @@ while :
 if :
 
   slti    $6    $5    'a'
-  slti    $7    $5    'z'
+  slti    $7    $5    'z'+1
   beq     $7    $0    end_if
-  beq     $6    1     end_if
+  bne     $6    $0    end_if
   addi    $5    $5    'A'-'a'
   sb      $5    0($4)
 

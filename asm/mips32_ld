@@ -1,0 +1,75 @@
+
+/* ###--------------------------------------------------------------###	*/
+/* file		: ldscript						*/
+/* date		: 29 Apr 2009						*/
+/* description	: ldscript for mips assemply programs			*/
+/* ###--------------------------------------------------------------###	*/
+
+	/* ###------------------------------------------------------###	*/
+	/*   memory size						*/
+	/* ###------------------------------------------------------###	*/
+
+user_text_size    = 0x00001000        ;
+user_stack_size   = 0x00001000        ;
+user_data_size    = 0x00002000        ;
+
+system_stack_size = 0x00001000        ;
+
+	/* ###------------------------------------------------------###	*/
+	/*   sections							*/
+	/* ###------------------------------------------------------###	*/
+
+SECTIONS
+  {
+	/* ###------------------------------------------------------###	*/
+	/*   addresses as symbols :					*/
+	/*								*/
+	/*     - user           text  address				*/
+	/*     - user           stack address				*/
+	/*     - user global    data  address				*/
+	/*     - user controllers     address				*/
+	/*								*/
+	/*     - kernel global  data  address				*/
+	/*								*/
+	/*     - exception      text  address				*/
+	/*     - boot           text  address				*/
+	/*     - boot exception text  address				*/
+	/* ###------------------------------------------------------###	*/
+
+   user_text_begin    = 0x00400000                          ;
+   user_stack_begin   = 0x7fffe000                          ;
+   user_data_begin    = 0x10000000                          ;
+
+   user_cntl_begin    = user_data_begin  + user_data_size   ;
+
+   kernel_stack_begin = 0xffffe000                          ;
+   kernel_data_begin  = 0xc0000000                          ;
+   kernel_term_begin  = 0xc0001000                          ;
+
+   excp_text_base     = 0x80000000                          ;
+   boot_excp_base     = 0xbfc00200                          ;
+   excp_base_offset   = 0x00000180                          ;
+
+   excp_text_begin    = excp_text_base   + excp_base_offset ;
+   boot_excp_begin    = boot_excp_base   + excp_base_offset ;
+   boot_text_begin    = 0xbfc00000                          ;
+
+	/* ###------------------------------------------------------###	*/
+	/*   section descriptions					*/
+	/* ###------------------------------------------------------###	*/
+
+  .text               user_text_begin    : { *(.text           ) }
+  .stack              user_stack_begin   : { *(.stack          ) }
+  .data               user_data_begin    : { *(.data   .rodata ) }
+
+  user_data_end       = .                ;
+
+  .reset              boot_text_begin    : { *(.boot   .reset  ) }
+  .bexcep             boot_excp_begin    : { *(        .bexcep ) }
+
+  .ktext              excp_text_begin    : { *(.ktext  .excep  ) }
+  .kstack             kernel_stack_begin : { *(.kstack         ) }
+  .kdata              kernel_data_begin  : { *(.kdata  .krodata) }
+
+  kernel_data_end     = .                ;
+  }

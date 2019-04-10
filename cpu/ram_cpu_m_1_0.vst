@@ -1,0 +1,365 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: ram_cpu_m_1_0.vst					#
+-- # date	: Oct 10 1998						#
+-- # version	: v0.9							#
+-- #									#
+-- # descr.	: Mips_32 cpu board					#
+-- #		  The board includes :					#
+-- #									#
+-- #		  - A  simple scalar microprogrammed Mips_32 processor	#
+-- #		  - An address decoder					#
+-- #									#
+-- #		  - A  4 KByte System Data Ram (      0xc0000000)	#
+-- #		  - A  4 KByte User   Data Ram (      0x10000000)	#
+-- #		  - A  4 KByte User   Data Ram (      0x10001000)	#
+-- #		  - A  4 KByte User   Data Ram (Stack 0x7fffd000)	#
+-- #									#
+-- #		  - A  4 KByte Instruction Ram (Reset - Boot    )	#
+-- #		  - A  4 KByte Instruction Ram (Exception       )	#
+-- #		  - A  4 KByte Instruction Ram (User            )	#
+-- #									#
+-- #		  - A  Simulation Controller   (as a 4 KByte ram)	#
+-- #		  - A  terminal                (as a 4 KByte ram)	#
+-- #									#
+-- # author	: Pirouz BAZARGAN SABET					#
+-- ### -------------------------------------------------------------- ###
+
+entity RAM_CPU_M_1_0 is
+
+  port (
+       signal CK       : in    bit                         ;-- clock
+       signal RESET_N  : in    bit                         ;-- reset
+       signal IT_N     : in    bit_vector ( 5 downto 0)    ;-- interrupts
+
+       signal TEST     : in    bit                         ;-- test mode
+       signal SCIN     : in    bit                         ;-- scan in
+       signal SCOUT    : out   bit                         ;-- scan out
+
+       signal VDD      : in    bit                         ;--
+       signal VSS      : in    bit                          --
+       );
+
+end RAM_CPU_M_1_0;
+
+architecture STRUCTRAL of RAM_CPU_M_1_0 is
+
+  signal D_A            : bit_vector ( 31 downto  2)    ;
+  signal D_ACCPT        : bit                           ;
+  signal D_RBERR        : bit                           ;
+  signal D_WBERR        : bit                           ;
+  signal D_RQ           : bit                           ;
+  signal D_RW           : bit                           ;
+  signal D_BYTSEL       : bit_vector (  3 downto  0)    ;
+  signal D_REG          : bit                           ;
+  signal D_SYNC         : bit                           ;
+  signal D_MODE         : bit_vector (  1 downto  0)    ;
+  signal D_LINKED       : bit                           ;
+  signal D_RSTLKD       : bit                           ;
+  signal D_TOMIPS       : bit_vector ( 31 downto  0)    ;
+  signal D_FRMIPS       : bit_vector ( 31 downto  0)    ;
+  signal D_ACK          : bit                           ;
+
+  signal RAM_ADR0       : bit_vector ( 11 downto  2)    ;
+  signal RAM_DAT0       : mux_vector ( 31 downto  0) bus;
+  signal RAM_RW0        : bit                           ;
+
+  signal E_00400000_N   : bit_vector (  3 downto  0)    ;
+  signal E_10000000_N   : bit_vector (  3 downto  0)    ;
+  signal E_10001000_N   : bit_vector (  3 downto  0)    ;
+  signal E_10002000_N   : bit_vector (  3 downto  0)    ;
+  signal E_7FFFD000_N   : bit_vector (  3 downto  0)    ;
+  signal E_80000000_N   : bit_vector (  3 downto  0)    ;
+  signal E_BFC00000_N   : bit_vector (  3 downto  0)    ;
+  signal E_C0000000_N   : bit_vector (  3 downto  0)    ;
+  signal E_C0001000_N   : bit_vector (  3 downto  0)    ;
+  signal E_COP2_REG_N   : bit_vector (  3 downto  0)    ;
+
+  component MIPS_32_M
+  port (
+       signal CK             : in    bit                           ;
+       signal RESET_N        : in    bit                           ;
+       signal IT_N           : in    bit_vector (  5 downto 0)     ;
+
+       signal D_A            : out   bit_vector ( 31 downto 2)     ;
+       signal D_BYTSEL       : out   bit_vector (  3 downto 0)     ;
+       signal D_RQ           : out   bit                           ;
+       signal D_RW           : out   bit                           ;
+       signal D_MODE         : out   bit_vector (  1 downto 0)     ;
+       signal D_SYNC         : out   bit                           ;
+       signal D_REG          : out   bit                           ;
+       signal D_LINKED       : out   bit                           ;
+       signal D_RSTLKD       : out   bit                           ;
+       signal D_RBERR        : in    bit                           ;
+       signal D_WBERR        : in    bit                           ;
+       signal D_ACCPT        : in    bit                           ;
+       signal D_OUT          : out   bit_vector ( 31 downto 0)     ;
+       signal D_IN           : in    bit_vector ( 31 downto 0)     ;
+       signal D_ACK          : out   bit                           ;
+
+       signal TEST           : in    bit                           ;
+       signal SCIN           : in    bit                           ;
+       signal SCOUT          : out   bit                           ;
+
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit                           ;
+       signal VDDP           : in    bit                           ;
+       signal VSSP           : in    bit
+       );
+  end component;
+
+  component MIPS_32_M_DEC
+  port (
+       signal CK             : in    bit                           ;
+       signal RESET_N        : in    bit                           ;
+
+       signal D_A            : in    bit_vector ( 31 downto 2)     ;
+       signal D_BYTSEL       : in    bit_vector (  3 downto 0)     ;
+       signal D_RQ           : in    bit                           ;
+       signal D_RW           : in    bit                           ;
+       signal D_MODE         : in    bit_vector (  1 downto 0)     ;
+       signal D_SYNC         : in    bit                           ;
+       signal D_REG          : in    bit                           ;
+       signal D_LINKED       : in    bit                           ;
+       signal D_RSTLKD       : in    bit                           ;
+       signal D_RBERR        : out   bit                           ;
+       signal D_WBERR        : out   bit                           ;
+       signal D_ACCPT        : out   bit                           ;
+       signal D_OUT          : out   bit_vector ( 31 downto 0)     ;
+       signal D_IN           : in    bit_vector ( 31 downto 0)     ;
+       signal D_ACK          : in    bit                           ;
+
+       signal RAM_ADR0       : out   bit_vector ( 11 downto  2)    ;
+       signal RAM_DAT0       : inout mux_vector ( 31 downto  0) bus;
+       signal RAM_RW0        : out   bit                           ;
+
+       signal E_00400000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10001000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_10002000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_7FFFD000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_80000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_BFC00000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_C0000000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_C0001000_N   : out   bit_vector (  3 downto  0)    ;
+       signal E_COP2_REG_N   : out   bit_vector (  3 downto  0)    ;
+
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit
+       );
+  end component;
+
+  component SR_1K_32_B
+  port (
+       signal E_N            : in    bit_vector (  3 downto  0)    ;
+       signal W_N            : in    bit                           ;
+       signal DAT            : inout mux_vector ( 31 downto  0) bus;
+       signal ADR            : in    bit_vector (  9 downto  0)    ;
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit
+       );
+  end component;
+
+  component SIM_CONTROLLER
+  port (
+       signal CK             : in    bit                           ;
+       signal RESET_N        : in    bit                           ;
+
+       signal E_N            : in    bit_vector (  3 downto  0)    ;
+       signal W_N            : in    bit                           ;
+       signal DAT            : inout mux_vector ( 31 downto  0) bus;
+       signal ADR            : in    bit_vector (  9 downto  0)    ;
+
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit
+       );
+  end component;
+
+  component C_TERM
+  port (
+       signal E_N            : in    bit_vector (  3 downto  0)    ;
+       signal W_N            : in    bit                           ;
+       signal DAT            : in    bit_vector ( 31 downto  0)    ;
+       signal VDD            : in    bit                           ;
+       signal VSS            : in    bit
+       );
+  end component;
+
+begin
+
+  MIPS : MIPS_32_M
+  port map (
+           CK             => CK             ,
+           RESET_N        => RESET_N        ,
+           IT_N           => IT_N           ,
+
+           D_A            => D_A            ,
+           D_BYTSEL       => D_BYTSEL       ,
+           D_RQ           => D_RQ           ,
+           D_RW           => D_RW           ,
+           D_MODE         => D_MODE         ,
+           D_SYNC         => D_SYNC         ,
+           D_REG          => D_REG          ,
+           D_LINKED       => D_LINKED       ,
+           D_RSTLKD       => D_RSTLKD       ,
+           D_RBERR        => D_RBERR        ,
+           D_WBERR        => D_WBERR        ,
+           D_ACCPT        => D_ACCPT        ,
+           D_OUT          => D_FRMIPS       ,
+           D_IN           => D_TOMIPS       ,
+           D_ACK          => D_ACK          ,
+
+           TEST           => TEST           ,
+           SCIN           => SCIN           ,
+           SCOUT          => SCOUT          ,
+
+           VDD            => VDD            ,
+           VSS            => VSS            ,
+           VDDP           => VDD            ,
+           VSSP           => VSS
+           );
+
+  DECODER : MIPS_32_M_DEC
+  port map (
+           CK             => CK             ,
+           RESET_N        => RESET_N        ,
+
+           D_A            => D_A            ,
+           D_BYTSEL       => D_BYTSEL       ,
+           D_RQ           => D_RQ           ,
+           D_RW           => D_RW           ,
+           D_MODE         => D_MODE         ,
+           D_SYNC         => D_SYNC         ,
+           D_REG          => D_REG          ,
+           D_LINKED       => D_LINKED       ,
+           D_RSTLKD       => D_RSTLKD       ,
+           D_RBERR        => D_RBERR        ,
+           D_WBERR        => D_WBERR        ,
+           D_ACCPT        => D_ACCPT        ,
+           D_OUT          => D_TOMIPS       ,
+           D_IN           => D_FRMIPS       ,
+           D_ACK          => D_ACK          ,
+
+           RAM_ADR0       => RAM_ADR0       ,
+           RAM_DAT0       => RAM_DAT0       ,
+           RAM_RW0        => RAM_RW0        ,
+
+           E_00400000_N   => E_00400000_N   ,
+           E_10000000_N   => E_10000000_N   ,
+           E_10001000_N   => E_10001000_N   ,
+           E_10002000_N   => E_10002000_N   ,
+           E_7FFFD000_N   => E_7FFFD000_N   ,
+           E_80000000_N   => E_80000000_N   ,
+           E_BFC00000_N   => E_BFC00000_N   ,
+           E_C0000000_N   => E_C0000000_N   ,
+           E_C0001000_N   => E_C0001000_N   ,
+           E_COP2_REG_N   => E_COP2_REG_N   ,
+
+           VDD            => VDD            ,
+           VSS            => VSS
+           );
+
+  RAM_FFFFF000_00000000 : SR_1K_32_B
+  port map (
+           E_N           => E_COP2_REG_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_10000000 : SR_1K_32_B
+  port map (
+           E_N           => E_10000000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_10001000 : SR_1K_32_B
+  port map (
+           E_N           => E_10001000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_7FFFD000 : SR_1K_32_B
+  port map (
+           E_N           => E_7FFFD000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_00400000 : SR_1K_32_B
+  port map (
+           E_N           => E_00400000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_C0000000 : SR_1K_32_B
+  port map (
+           E_N           => E_C0000000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_BFC00000 : SR_1K_32_B
+  port map (
+           E_N           => E_BFC00000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  RAM_FFFFF000_80000000 : SR_1K_32_B
+  port map (
+           E_N           => E_80000000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  CONTROL : SIM_CONTROLLER
+  port map (
+           CK            => CK             ,
+           RESET_N       => RESET_N        ,
+
+           E_N           => E_10002000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+           ADR           => RAM_ADR0       ,
+
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+
+  TERMINAL : C_TERM
+  port map (
+           E_N           => E_C0001000_N   ,
+           W_N           => RAM_RW0        ,
+           DAT           => RAM_DAT0       ,
+
+           VDD           => VDD            ,
+           VSS           => VSS
+           );
+end;

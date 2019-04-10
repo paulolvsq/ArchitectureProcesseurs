@@ -1,0 +1,8 @@
+mips_32_m			C
+
+mips_32_m_dec			C
+
+c_sr1k_8b			C
+c_term				C
+
+sim_controller			C

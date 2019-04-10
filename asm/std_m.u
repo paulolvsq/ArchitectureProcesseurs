@@ -1,0 +1,605 @@
+
+;  ### -------------------------------------------------------------- ###
+;  # file	: std_m.u						#
+;  # date	: Mar 26 1996						#
+;  # descr.	: functional test for Mips R3000			#
+;  ### -------------------------------------------------------------- ###
+
+			.data
+
+stat_str_0  :		.ascii	"cycle count : "
+stat_buf_0  :		.space  16
+stat_str_1  :		.ascii	"data transaction cycle : "
+stat_buf_1  :		.space  16
+stat_str_2  :		.ascii	"data stall cycle : "
+stat_buf_2  :		.space  16
+stat_str_3  :		.ascii	"data read : "
+stat_buf_3  :		.space  16
+stat_str_4  :		.ascii	"uncachable data read : "
+stat_buf_4  :		.space  16
+stat_str_5  :		.ascii	"data read miss clean block : "
+stat_buf_5  :		.space  16
+stat_str_6  :		.ascii	"data read miss dirty block : "
+stat_buf_6  :		.space  16
+stat_str_7  :		.ascii	"data read stall cycle : "
+stat_buf_7  :		.space  16
+stat_str_8  :		.ascii	"data write : "
+stat_buf_8  :		.space  16
+stat_str_9  :		.ascii	"uncachable data write : "
+stat_buf_9  :		.space  16
+stat_str_10 :		.ascii	"data write miss clean block : "
+stat_buf_10 :		.space  16
+stat_str_11 :		.ascii	"data write miss dirty block : "
+stat_buf_11 :		.space  16
+stat_str_12 :		.ascii	"data write stall cycle : "
+stat_buf_12 :		.space  16
+stat_str_13 :		.ascii	"update transaction : "
+stat_buf_13 :		.space  16
+stat_str_14 :		.ascii	"instruction transaction cycle : "
+stat_buf_14 :		.space  16
+stat_str_15 :		.ascii	"instruction stall cycle : "
+stat_buf_15 :		.space  16
+stat_str_16 :		.ascii	"instruction read : "
+stat_buf_16 :		.space  16
+stat_str_17 :		.ascii	"uncachable instruction read : "
+stat_buf_17 :		.space  16
+stat_str_18 :		.ascii	"instruction read miss : "
+stat_buf_18 :		.space  16
+
+			.align	2
+
+stat_table  :		.word	stat_str_0
+			.word	stat_buf_0
+			.word	stat_str_1 
+			.word	stat_buf_1
+			.word	stat_str_2 
+			.word	stat_buf_2
+			.word	stat_str_3 
+			.word	stat_buf_3
+			.word	stat_str_4 
+			.word	stat_buf_4
+			.word	stat_str_5 
+			.word	stat_buf_5
+			.word	stat_str_6 
+			.word	stat_buf_6
+			.word	stat_str_7 
+			.word	stat_buf_7
+			.word	stat_str_8 
+			.word	stat_buf_8
+			.word	stat_str_9 
+			.word	stat_buf_9
+			.word	stat_str_10 
+			.word	stat_buf_10
+			.word	stat_str_11 
+			.word	stat_buf_11
+			.word	stat_str_12 
+			.word	stat_buf_12
+			.word	stat_str_13 
+			.word	stat_buf_13
+			.word	stat_str_14 
+			.word	stat_buf_14
+			.word	stat_str_15 
+			.word	stat_buf_15
+			.word	stat_str_16 
+			.word	stat_buf_16
+			.word	stat_str_17 
+			.word	stat_buf_17
+			.word	stat_str_18 
+			.word	stat_buf_18
+
+	;  ### ------------------------------------------------------ ###
+	;  #   text section (standard functions)			#
+	;  #     - no reorder						#
+	;  ### ------------------------------------------------------ ###
+
+			.text
+			.set	noreorder
+
+	;  ### ------------------------------------------------------ ###
+	;  #   global functions						#
+	;  ### ------------------------------------------------------ ###
+
+			.globl	_exit
+			.globl	_GetCacheStats
+			.globl	_PrintCacheStats
+
+			.globl	_putchar
+			.globl	_puts
+			.globl	_fputs
+
+			.globl	_idiv_10
+			.globl	_uidiv_10
+
+			.globl	_itoa_d
+			.globl	_uitoa_d
+
+			.globl	_strlen
+			.globl	_strcpy
+			.globl	_strcmp
+
+	;  ### ------------------------------------------------------ ###
+	;  #   syscall numbers						#
+	;  ### ------------------------------------------------------ ###
+
+syscall_nbr_exit		.equ	0x0000 * 4
+syscall_nbr_putchar		.equ	0x0001 * 4
+syscall_nbr_puts		.equ	0x0002 * 4
+syscall_nbr_fputs		.equ	0x0003 * 4
+syscall_nbr_GetCacheStats	.equ	0x0004 * 4
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: PrintCacheStats					#
+;  #									#
+;  # description: print the cache statistics				#
+;  #									#
+;  #              coprocessor 2's performance counters :		#
+;  #									#
+;  #              -   0 : cycle count					#
+;  #              -   1 : data transaction cycle			#
+;  #              -   2 : stall cycle due to data access		#
+;  #              -   3 : data read request				#
+;  #              -   4 : miss - uncachable data        read  request	#
+;  #              -   5 : miss - cachable   data        read  request	#
+;  #                      clean cache block replacement			#
+;  #              -   6 : miss - cachable   data        read  request	# 
+;  #                      dirty cache block replacement			#
+;  #              -   7 : stall cycle due to read data access		#
+;  #              -   8 : data write request				#
+;  #              -   9 : miss - uncachable data        write request	#
+;  #              -  10 : miss - cachable   data        write request	#
+;  #                      clean cache block replacement			#
+;  #              -  11 : miss - cachable   data        write request	#
+;  #                      dirty cache block replacement			#
+;  #              -  12 : stall cycle due to write data access		#
+;  #              -  13 : memory update transaction			#
+;  #									#
+;  #              -  14 : instruction transaction cycle			#
+;  #              -  15 : stall cycle due to instruction read		#
+;  #              -  16 : instruction read request			#
+;  #              -  17 : miss - uncachable instruction read  request	#
+;  #              -  18 : miss - cachable   instruction read  request	#
+;  #                      clean cache block replacement			#
+;  #									#
+;  # parameters	: struct cache_stats *p					#
+;  #		  the pointer on a cache's statistics structure		#
+;  # return	: none							#
+;  #									#
+;  # called func: uitoa_d, puts						#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_PrintCacheStats :
+			addiu	r29, r29, - 4*4
+			sw	r16,        0*4 (r29)
+			sw	r17,        1*4 (r29)
+			sw	r18,        2*4 (r29)
+			sw	r31,        3*4 (r29)
+			
+			move	r16, r4
+
+	;  ### ------------------------------------------------------ ###
+	;  ### ------------------------------------------------------ ###
+
+			la	r17,      stat_table
+			addiu	r18, r17, 19*4*2
+
+_PrintCacheStats_loop :
+			lw	r4 , 0 (r16)
+			lw	r5 , 4 (r17)
+			jal	_uitoa_d
+
+			addiu	r17, r17, 8
+
+			lw	r4 , -8 (r17)
+			jal	_puts
+
+			addiu	r16, r16, 4
+			bne	r17, r18, _PrintCacheStats_loop
+
+	;  ### ------------------------------------------------------ ###
+	;  ### ------------------------------------------------------ ###
+
+			lw	r31,        3*4 (r29)
+			lw	r18,        2*4 (r29)
+			lw	r17,        1*4 (r29)
+			lw	r16,        0*4 (r29)
+			
+			addiu	r29, r29,   4*4
+			jr	r31
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: GetCacheStats						#
+;  #									#
+;  # description: get the cache statistics				#
+;  #		  return the pointer on a structure filled with the	#
+;  #		  cache's statistics					#
+;  #									#
+;  # parameters	: struct cache_stats *p					#
+;  # return	: struct cache_stats *					#
+;  #									#
+;  # called func: none							#
+;  # syscall	: syscall_GetCacheStats					#
+;  #		  the structure pointer is already in r4		#
+;  ### -------------------------------------------------------------- ###
+
+_GetCacheStats :
+			ori	r2 , r0 , syscall_nbr_GetCacheStats
+			syscall
+
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: putchar						#
+;  #									#
+;  # description: print a character					#
+;  #		  return the character					#
+;  #									#
+;  # parameters	: int c							#
+;  # return	: int							#
+;  #									#
+;  # called func: none							#
+;  # syscall	: syscall_putchar					#
+;  #		  the character is already in r4			#
+;  ### -------------------------------------------------------------- ###
+
+_putchar :
+			ori	r2 , r0 , syscall_nbr_putchar
+			syscall
+
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: puts							#
+;  #									#
+;  # description: print a string and a trailing '\n' on stdout		#
+;  #		  return 1						#
+;  #									#
+;  # parameters	: char *str						#
+;  # return	: int  (1)						#
+;  #									#
+;  # called func: none							#
+;  # syscall	: syscall_puts						#
+;  #		  the address of string is already in r4		#
+;  ### -------------------------------------------------------------- ###
+
+_puts :
+			ori	r2 , r0 , syscall_nbr_puts
+			syscall
+
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: fputs							#
+;  #									#
+;  # description: print a string					#
+;  #		  return 1						#
+;  #									#
+;  # parameters	: char *str, FILE *fp (ignored)				#
+;  # return	: int  (1)						#
+;  #									#
+;  # called func: none							#
+;  # syscall	: syscall_fputs						#
+;  #		  the address of string is already in r4		#
+;  ### -------------------------------------------------------------- ###
+
+_fputs :
+			ori	r2 , r0 , syscall_nbr_fputs
+			syscall
+
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: exit							#
+;  #									#
+;  # description: exit the main program. The parameter is the exit's	#
+;  #		  number						#
+;  #									#
+;  # parameters	: int							#
+;  # return	: none							#
+;  #									#
+;  # called func: none							#
+;  # syscall	: syscall_exit						#
+;  #		  the exit value is already in r4			#
+;  ### -------------------------------------------------------------- ###
+
+_exit :
+			ori	r2 , r0 , syscall_nbr_exit
+			syscall
+
+			jr	r31			; not realy needed
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: strlen						#
+;  #									#
+;  # description: string length						#
+;  #		  return the length of a string				#
+;  #									#
+;  # parameters	: char        *str					#
+;  # return	: unsigned int len					#
+;  #									#
+;  # called func: none							#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_strlen :
+			addiu	r2 , r4 ,  1
+
+_strlen_loop :
+			lb	r8 ,  0 (r4 )
+			addiu	r4 , r4 , 1
+			bne	r8 , r0 , _strlen_loop
+
+			subu	r2 , r4, r2
+			jr	r31
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: strcpy						#
+;  #									#
+;  # description: string copy - copy a source string into the target	#
+;  #		  return the target string				#
+;  #									#
+;  # parameters	: char *trg, char *src					#
+;  # return	: char *trg						#
+;  #									#
+;  # called func: none							#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_strcpy :
+			addu	r2 , r4 , r0
+
+_strcpy_loop :
+			lb	r8 ,       0 (r5 )
+			addiu	r5 , r5 ,  1
+			sb	r8 ,       0 (r4 )
+			addiu	r4 , r4 ,  1
+			bne	r8 , r0 , _strcpy_loop
+
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: strcmp						#
+;  #									#
+;  # description: string compare - return an integer resulting from the	#
+;  #		  comparison of two strings				#
+;  #									#
+;  # parameters	: char *s1, char *s2					#
+;  # return	: int							#
+;  #									#
+;  # called func: none							#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_strcmp :
+			lb	r8 ,       0 (r4 )
+			lb	r9 ,       0 (r5 )
+
+_strcmp_loop :
+			addiu	r5 , r5 ,  1
+			sub	r2 , r8 , r9
+			addiu	r4 , r4 ,  1
+
+			lb	r9 ,       0 (r5 )
+			bne	r2 , r0 , _strcmp_end_loop
+
+			lb	r8 ,       0 (r4 )
+			bne	r8 , r0 , _strcmp_loop
+
+_strcmp_end_loop :
+			jr	r31
+			nop
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: uidiv_10						#
+;  #									#
+;  # description: make an unsigned integer division by 10		#
+;  #		  x/10 = x/8 * (1 - 1/4 + 1/16 - 1/64 + ...)		#
+;  #		  return the quotient					#
+;  #									#
+;  # parameters	: unsigned int x					#
+;  # return	: unsigned int q					#
+;  #									#
+;  # called func: none							#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_uidiv_10 :
+			addu	r8 , r0 , r4
+			addu	r2 , r0 , r4
+			srl	r4 , r4 ,  2
+
+_uidiv_10_loop :
+			subu	r2 , r2 , r4
+			srl	r4 , r4 ,  2
+			addu	r2 , r2 , r4
+			srl	r4 , r4 ,  2
+			bne	r4 , r0 , _uidiv_10_loop
+
+			srl	r2 , r2 ,  3
+
+			addiu	r2 , r2 ,  1
+
+			sll	r9 , r2 ,  2
+			addu	r9 , r2 , r9
+			sll	r9 , r9 ,  1
+
+			sltu	r10, r8 , r9
+			subu	r2 , r2 , r10
+			sll	r10, r10, 31
+			sra	r10, r10, 31
+			andi	r10, r10, 0x000a
+			subu	r9 , r9 , r10
+
+			sltu	r10, r8 , r9
+
+			subu	r2 , r2 , r10
+			jr	r31
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: idiv_10						#
+;  #									#
+;  # description: make a signed integer division by 10			#
+;  #		  return the quotient					#
+;  #									#
+;  # parameters	: int x							#
+;  # return	: int q							#
+;  #									#
+;  # called func: uidiv_10						#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_idiv_10 :
+			addiu	r29, r29, - 2*4
+			sw	r16,        0*4 (r29)
+			sw	r31,        1*4 (r29)
+
+			addu	r16, r0 , r0
+			bltz	r4 , _idiv_10_endif
+
+			sub	r4 , r0 , r4
+			addiu	r16, r0 , -1
+
+_idiv_10_endif :
+			xor	r2 , r2 , r16
+			jal	_uidiv_10
+
+			lw	r31,        1*4 (r29)
+			lw	r16,        0*4 (r29)
+
+			addiu	r29, r29,   2*4
+			jr	r31
+
+;  ### -------------------------------------------------------------- ###
+;  # function	: itoa_d						#
+;  #									#
+;  # description: convert a signed integer into a string (decimal)	#
+;  #		  return the string's pointer				#
+;  #									#
+;  # parameters	: int   x  , char *str					#
+;  # return	: char *str						#
+;  #									#
+;  # called func: uitoa_d						#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_itoa_d :
+			addiu	r29, r29, - 2*4
+			sw	r16,        0*4 (r29)
+			sw	r31,        1*4 (r29)
+
+			addu	r16, r5 , r0		; save return adr
+			bgez	r4 , _itoa_d_endif
+
+			sub	r4 , r0 , r4
+			ori	r8 , r0 , '-'
+			sb	r8 ,        0   (r5 )
+			addiu	r5 , r5 ,   1
+
+_itoa_d_endif :
+			jal	_uitoa_d
+			nop
+
+			addu	r2 , r16, r0
+
+			lw	r31,        1*4 (r29)
+			lw	r16,        0*4 (r29)
+
+			addiu	r29, r29,   2*4
+			jr	r31
+			
+;  ### -------------------------------------------------------------- ###
+;  # function	: uitoa_d						#
+;  #									#
+;  # description: convert an unsigned integer into a string (decimal)	#
+;  #		  return the string					#
+;  #									#
+;  # parameters	: int   x  , char *str					#
+;  # return	: char *str						#
+;  #									#
+;  # called func: uidiv_10						#
+;  # syscall	: none							#
+;  ### -------------------------------------------------------------- ###
+
+_uitoa_d :
+			addiu	r29, r29, - 5*4
+			sw	r16,        0*4 (r29)
+			sw	r17,        1*4 (r29)
+			sw	r18,        2*4 (r29)
+			sw	r19,        3*4 (r29)
+			sw	r31,        4*4 (r29)
+
+			addu	r2 , r4 , r0		; save int
+			addu	r18, r5 , r0		; save str adr
+			addu	r19, r5 , r0		; save str adr
+
+			addu	r16, r5 , r0		; save str adr
+			bne	r4 , r0 , _uitoa_d_not_zero
+
+	;  ### ------------------------------------------------------ ###
+	;  #   parameter is zero					#
+	;  ### ------------------------------------------------------ ###
+
+			ori	r8 , r0 , '0'
+			sb	r8 ,       0   (r18)	; print '0'
+
+			sb	r0 ,       1   (r18)	; print '\0'
+			j	_uitoa_d_endif
+
+	;  ### ------------------------------------------------------ ###
+	;  #   parameter is not zero					#
+	;  #     - save remainders in the string			#
+	;  #     - shuffle the string					#
+	;  ### ------------------------------------------------------ ###
+
+_uitoa_d_not_zero :
+			addu	r17, r2 , r0		; save int
+			jal	_uidiv_10
+
+			sll	r8 , r2 ,  2
+			addu	r8 , r8 , r2
+			sll	r8 , r8 ,  1
+			subu	r8 , r17, r8		; div 10 remainder
+			addiu	r8 , r8 , '0'
+			sb	r8 ,       0   (r18)
+			addu	r4 , r0 , r2		; next round
+
+			addiu	r18, r18,  1
+			bne	r2 , r0 , _uitoa_d_not_zero
+
+			sb	r0 ,       0   (r18)	; print '\0'
+			addiu	r18, r18, -1
+
+_uitoa_d_shuffle_loop :
+			lb	r8 ,       0   (r18)
+			addiu	r18, r18, -1
+			lb	r9 ,       0   (r16)
+			addiu	r16, r16,  1
+			subu	r10, r18, r16
+			sb	r8 ,      -1   (r16)
+
+			sb	r9 ,       1   (r18)
+			bgtz	r10,      _uitoa_d_shuffle_loop
+
+	;  ### ------------------------------------------------------ ###
+	;  #   end if							#
+	;  ### ------------------------------------------------------ ###
+
+_uitoa_d_endif :
+			addu	r2 , r19, r0
+
+			lw	r31,        4*4 (r29)
+			lw	r19,        3*4 (r29)
+			lw	r18,        2*4 (r29)
+			lw	r17,        1*4 (r29)
+			lw	r16,        0*4 (r29)
+
+			addiu	r29, r29,   5*4
+			jr	r31
+
+			.end

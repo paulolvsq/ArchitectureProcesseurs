@@ -1,0 +1,2143 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: mips_32_m.vbe						#
+-- # date	: Apr 11 2010						#
+-- # version	: v2.0							#
+-- #									#
+-- # origin	: this description has been developed at LIP6		#
+-- #		  University Paris 6 - Pierre et Marie Curie		#
+-- #		  4 Place Jussieu 75252 Paris Cedex 05 - France		#
+-- #									#
+-- # descr.	: data flow description of a microprogrammed		#
+-- #		  Mips-32 processor					#
+-- #									#
+-- # authors	: Pirouz Bazargan Sabet					#
+-- ### -------------------------------------------------------------- ###
+
+entity MIPS_32_M is
+
+port
+  (
+  signal   CK         : in    bit                          ;-- clock
+  signal   RESET_N    : in    bit                          ;-- reset
+  signal   IT_N       : in    bit_vector (  5 downto 0)    ;-- hw interrupts
+
+  signal   D_A        : out   bit_vector ( 31 downto 2)    ;-- data adr
+  signal   D_BYTSEL   : out   bit_vector (  3 downto 0)    ;-- data byt select
+  signal   D_RQ       : out   bit                          ;-- data rqst
+  signal   D_RW       : out   bit                          ;-- data read-write
+  signal   D_MODE     : out   bit_vector (  1 downto 0)    ;-- data mode
+  signal   D_SYNC     : out   bit                          ;-- data synchron
+  signal   D_REG      : out   bit                          ;-- data ext reg
+  signal   D_LINKED   : out   bit                          ;-- data linked
+  signal   D_RSTLKD   : out   bit                          ;-- reset linked
+  signal   D_RBERR    : in    bit                          ;-- data bus error
+  signal   D_WBERR    : in    bit                          ;-- data bus error
+  signal   D_ACCPT    : in    bit                          ;-- data rqst accept
+  signal   D_OUT      : out   bit_vector ( 31 downto 0)    ;-- data (output)
+  signal   D_IN       : in    bit_vector ( 31 downto 0)    ;-- data (input )
+  signal   D_ACK      : out   bit                          ;-- data rqst ack
+
+  signal   TEST       : in    bit                          ;-- test mode
+  signal   SCIN       : in    bit                          ;-- scan in
+  signal   SCOUT      : out   bit                          ;-- scan out
+
+  signal   VDD        : in    bit                          ;--
+  signal   VSS        : in    bit                          ;--
+  signal   VDDP       : in    bit                          ;--
+  signal   VSSP       : in    bit
+  );
+
+end MIPS_32_M;
+--
+
+-- ### -------------------------------------------------------------- ###
+-- #   internal description - contains the following sections :		#
+-- #									#
+-- #     - internal signal and register declarations			#
+-- #     - constant declarations					#
+-- #     - instructions' table						#
+-- #     - implementation of micro-instructions				#
+-- #     - signals' and registers' assignments				#
+-- #									#
+-- #   Each signal or register is suffixed by two letters.		#
+-- #									#
+-- #   The first letter identifies the type of the signal :		#
+-- #     - R : a register sampling on the clock's rising  edge		#
+-- #     - F : a register sampling on the clock's falling edge		#
+-- #     - S : signal related to the normal execution			#
+-- #     - X : signal related to the interrupt or exception mechanisms	#
+-- #									#
+-- #   The second letter is X.						#
+-- ### -------------------------------------------------------------- ###
+
+architecture BEHAVIOURAL of MIPS_32_M is
+
+signal   CK_SX        : bit                              ;-- clock
+
+signal   IT_XX        : bit_vector ( 5 downto 0)         ;-- int
+
+signal   DIN_SX       : bit_vector (31 downto 0)         ;-- data in
+signal   DA_SX        : bit_vector (31 downto 0)         ;-- data adr
+
+signal   I_RX         : reg_vector (31 downto 0) register;-- inst reg
+signal   OPC_SX       : bit_vector ( 5 downto 0)         ;-- opcod
+signal   RS_SX        : bit_vector ( 4 downto 0)         ;-- src  reg nbr
+signal   RT_SX        : bit_vector ( 4 downto 0)         ;-- src  reg nbr
+signal   RD_SX        : bit_vector ( 4 downto 0)         ;-- dest reg nbr
+signal   SHAM_SX      : bit_vector ( 4 downto 0)         ;-- shift amount
+signal   FUN_SX       : bit_vector ( 5 downto 0)         ;-- function
+
+signal   NEXTPC_RX    : reg_vector (31 downto 0) register;-- inst adr
+signal   PC_RX        : reg_vector (31 downto 0) register;-- inst adr
+
+signal   UINS_SX      : bit_vector (41 downto 0)         ;-- micro-adr
+signal   UINS_RX      : reg_vector (41 downto 0) register;-- micro-inst
+
+signal   U_XOP_SX     : bit_vector ( 3 downto 0)         ;-- micro-inst field
+signal   U_YOP_SX     : bit_vector ( 3 downto 0)         ;-- micro-inst field
+signal   U_ALU_SX     : bit_vector ( 3 downto 0)         ;-- micro_inst field
+signal   U_RES_SX     : bit_vector ( 4 downto 0)         ;-- micro_inst field
+signal   U_MEM_SX     : bit_vector ( 3 downto 0)         ;-- micro_inst field
+signal   U_EXC_SX     : bit_vector ( 3 downto 0)         ;-- micro_inst field
+signal   U_SEQ_SX     : bit_vector ( 4 downto 0)         ;-- micro_inst field
+signal   U_MAD_SX     : bit_vector (11 downto 0)         ;-- micro_inst field
+
+signal   A_SUB_SX     : bit                              ;-- oper unit cmd
+signal   A_SRA_SX     : bit                              ;-- oper unit cmd
+signal   A_SLL_SX     : bit                              ;-- oper unit cmd
+signal   A_AND_SX     : bit                              ;-- oper unit cmd
+signal   A_NOR_SX     : bit                              ;-- oper unit cmd
+signal   A_XOR_SX     : bit                              ;-- oper unit cmd
+signal   A_ARI_SX     : bit                              ;-- oper unit cmd
+signal   A_SHF_SX     : bit                              ;-- oper unit cmd
+signal   A_LOG_SX     : bit                              ;-- oper unit cmd
+signal   A_EQ_SX      : bit                              ;-- oper unit cmd
+signal   A_NE_SX      : bit                              ;-- oper unit cmd
+signal   A_LT_SX      : bit                              ;-- oper unit cmd
+signal   A_LTU_SX     : bit                              ;-- oper unit cmd
+signal   A_TST_SX     : bit                              ;-- oper unit cmd
+
+signal   R_RT_SX      : bit                              ;-- save res cmd
+signal   R_RD_SX      : bit                              ;-- save res cmd
+signal   R_R31_SX     : bit                              ;-- save res cmd
+signal   R_LO_SX      : bit                              ;-- save res cmd
+signal   R_HI_SX      : bit                              ;-- save res cmd
+signal   R_CR_SX      : bit                              ;-- save res cmd
+signal   R_XCR_SX     : bit                              ;-- save res cmd
+signal   R_SR_SX      : bit                              ;-- save res cmd
+signal   R_EPC_SX     : bit                              ;-- save res cmd
+signal   R_EEP_SX     : bit                              ;-- save res cmd
+signal   R_EBS_SX     : bit                              ;-- save res cmd
+signal   R_BVA_SX     : bit                              ;-- save res cmd
+signal   R_DAD_SX     : bit                              ;-- save res cmd
+signal   R_DOT_SX     : bit                              ;-- save res cmd
+signal   R_NPC_SX     : bit                              ;-- save res cmd
+
+signal   M_ACS_SX     : bit                              ;-- mem acs cmd
+signal   M_WRD_SX     : bit                              ;-- mem acs cmd
+signal   M_HLF_SX     : bit                              ;-- mem acs cmd
+signal   M_BYT_SX     : bit                              ;-- mem acs cmd
+signal   M_RED_SX     : bit                              ;-- mem acs cmd
+signal   M_WRT_SX     : bit                              ;-- mem acs cmd
+signal   M_INS_SX     : bit                              ;-- mem acs cmd
+signal   M_DAT_SX     : bit                              ;-- mem acs cmd
+signal   M_XRG_SX     : bit                              ;-- mem acs cmd
+signal   M_LKD_SX     : bit                              ;-- mem acs cmd
+signal   M_RLK_SX     : bit                              ;-- mem acs cmd
+
+signal   M_IR_SX      : bit                              ;-- mem acs cmd
+signal   M_DIN_SX     : bit                              ;-- mem acs cmd
+signal   M_PC_SX      : bit                              ;-- mem acs cmd
+
+signal   E_AD_SX      : bit                              ;-- svd adr wen
+
+signal   C0DRNBR_SX   : bit_vector ( 7 downto 0)         ;-- cp0 dest nbr
+signal   WCAUSE_SX    : bit                              ;-- cp0 dest nbr
+signal   WBADVA_SX    : bit                              ;-- cp0 dest nbr
+signal   WSTATUS_SX   : bit                              ;-- cp0 dest nbr
+signal   WEPC_SX      : bit                              ;-- cp0 dest nbr
+signal   WEEPC_SX     : bit                              ;-- cp0 dest nbr
+signal   WEBASE_SX    : bit                              ;-- cp0 dest nbr
+
+signal   MODE_SX      : bit_vector ( 1 downto 0)         ;-- acs mode
+signal   USRMOD_SX    : bit                              ;-- usr mode
+
+signal   BYTSEL_SX    : bit_vector ( 3 downto 0)         ;-- byte select
+
+signal   DBYT_SX      : bit_vector ( 7 downto 0)         ;-- data out
+signal   DHLF_SX      : bit_vector (15 downto 0)         ;-- data out
+signal   DWRD_SX      : bit_vector (31 downto 0)         ;-- data out
+signal   DOUT_SX      : bit_vector (31 downto 0)         ;-- data out
+
+signal   FWWE_SX      : bit                              ;-- global wrt en
+signal   FWXWE_SX     : bit                              ;-- global wrt en
+signal   FWAXWE_SX    : bit                              ;-- global wrt en
+
+signal   UIWE_SX      : bit                              ;-- micro-ins we
+signal   EXCWE_XX     : bit                              ;-- exc bits  we
+
+signal   UAOPC_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAFUN_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAEQZ_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UANEZ_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UALT_SX      : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAGE_SX      : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAF10_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAF32_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAF54_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAS10_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAS32_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAS4_SX      : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAT10_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAT32_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAT4_SX      : bit_vector (11 downto 0)         ;-- micro-adr
+signal   UAEXC_SX     : bit_vector (11 downto 0)         ;-- micro-adr
+
+signal   UADR_SX      : bit_vector (11 downto 0)         ;-- micro-adr
+
+signal   ISRNBR_SX    : bit_vector ( 4 downto 0)         ;-- src reg nbr
+signal   X_ISR_SX     : bit_vector (31 downto 0)         ;-- src reg
+
+signal   C0SRNBR_SX   : bit_vector ( 7 downto 0)         ;-- cop0 src reg nbr
+signal   Y_C0SR_SX    : bit_vector (31 downto 0)         ;-- cop0 src reg
+
+signal   XOPER_SX     : bit_vector (31 downto 0)         ;-- x operand
+signal   YOPER_SX     : bit_vector (31 downto 0)         ;-- y operand
+
+signal   XARITH_SX    : bit_vector (31 downto 0)         ;-- oper for arithm
+signal   YARITH_SX    : bit_vector (31 downto 0)         ;-- oper for arithm
+
+signal   ARICIN_SX    : bit_vector (31 downto 0)         ;-- arithm cry
+signal   ARICRY_SX    : bit_vector (31 downto 0)         ;-- arithm cry
+signal   RARITH_SX    : bit_vector (31 downto 0)         ;-- arithm result
+
+signal   YSHIFT_SX    : bit_vector ( 4 downto 0)         ;-- oper for shift
+
+signal   XSHIFT_SX    : bit_vector (31 downto 0)         ;-- oper for shift
+signal   XEXT_SX      : bit_vector (31 downto 0)         ;-- oper for shift
+
+signal   SHIFTIN_SX   : bit_vector (31 downto 0)         ;-- shift in
+signal   SHRIGHT_SX   : bit_vector (31 downto 0)         ;-- shift result
+signal   SHLEFT_SX    : bit_vector (31 downto 0)         ;-- shift result
+signal   RSHIFT_SX    : bit_vector (31 downto 0)         ;-- shift result
+
+signal   RLOGIC_SX    : bit_vector (31 downto 0)         ;-- logic result
+
+signal   TESTBIT_SX   : bit                              ;-- test unit res
+signal   RTEST_SX     : bit_vector (31 downto 0)         ;-- test unit res
+
+signal   RES_SX       : bit_vector (31 downto 0)         ;-- alu result
+
+signal   IDRNBR_SX    : bit_vector ( 4 downto 0)         ;-- dest reg nbr
+signal   R_IDR_SX     : bit_vector (31 downto 0)         ;-- dest reg nbr
+
+signal   R1_RX        : reg_vector (31 downto 0) register;-- int reg nbr  1
+signal   R2_RX        : reg_vector (31 downto 0) register;-- int reg nbr  2
+signal   R3_RX        : reg_vector (31 downto 0) register;-- int reg nbr  3
+signal   R4_RX        : reg_vector (31 downto 0) register;-- int reg nbr  4
+signal   R5_RX        : reg_vector (31 downto 0) register;-- int reg nbr  5
+signal   R6_RX        : reg_vector (31 downto 0) register;-- int reg nbr  6
+signal   R7_RX        : reg_vector (31 downto 0) register;-- int reg nbr  7
+signal   R8_RX        : reg_vector (31 downto 0) register;-- int reg nbr  8
+signal   R9_RX        : reg_vector (31 downto 0) register;-- int reg nbr  9
+signal   R10_RX       : reg_vector (31 downto 0) register;-- int reg nbr 10
+signal   R11_RX       : reg_vector (31 downto 0) register;-- int reg nbr 11
+signal   R12_RX       : reg_vector (31 downto 0) register;-- int reg nbr 12
+signal   R13_RX       : reg_vector (31 downto 0) register;-- int reg nbr 13
+signal   R14_RX       : reg_vector (31 downto 0) register;-- int reg nbr 14
+signal   R15_RX       : reg_vector (31 downto 0) register;-- int reg nbr 15
+signal   R16_RX       : reg_vector (31 downto 0) register;-- int reg nbr 16
+signal   R17_RX       : reg_vector (31 downto 0) register;-- int reg nbr 17
+signal   R18_RX       : reg_vector (31 downto 0) register;-- int reg nbr 18
+signal   R19_RX       : reg_vector (31 downto 0) register;-- int reg nbr 19
+signal   R20_RX       : reg_vector (31 downto 0) register;-- int reg nbr 20
+signal   R21_RX       : reg_vector (31 downto 0) register;-- int reg nbr 21
+signal   R22_RX       : reg_vector (31 downto 0) register;-- int reg nbr 22
+signal   R23_RX       : reg_vector (31 downto 0) register;-- int reg nbr 23
+signal   R24_RX       : reg_vector (31 downto 0) register;-- int reg nbr 24
+signal   R25_RX       : reg_vector (31 downto 0) register;-- int reg nbr 25
+signal   R26_RX       : reg_vector (31 downto 0) register;-- int reg nbr 26
+signal   R27_RX       : reg_vector (31 downto 0) register;-- int reg nbr 27
+signal   R28_RX       : reg_vector (31 downto 0) register;-- int reg nbr 28
+signal   R29_RX       : reg_vector (31 downto 0) register;-- int reg nbr 29
+signal   R30_RX       : reg_vector (31 downto 0) register;-- int reg nbr 30
+signal   R31_RX       : reg_vector (31 downto 0) register;-- int reg nbr 31
+
+signal   LO_RX        : reg_vector (31 downto 0) register;-- low reg
+signal   HI_RX        : reg_vector (31 downto 0) register;-- high reg
+
+signal   R_EQ_Z_SX    : bit                              ;-- equal zero
+signal   X_EQ_Y_SX    : bit                              ;-- equal
+signal   X_LT_Y_SX    : bit                              ;-- less than
+signal   X_LTU_Y_SX   : bit                              ;-- less than uns
+
+signal   EQZ_RX       : reg_bit                  register;-- equal
+signal   LT_RX        : reg_bit                  register;-- less than
+signal   LTU_RX       : reg_bit                  register;-- less than uns
+
+signal   AD_SX        : bit_vector (31 downto 0)         ;-- adr
+signal   AD_RX        : reg_vector (31 downto 0) register;-- adr
+
+signal   DAD_RX       : reg_vector (31 downto 0) register;-- data adr
+signal   DIN_RX       : reg_vector (31 downto 0) register;-- data in
+signal   DOUT_RX      : reg_vector (31 downto 0) register;-- data out
+
+signal   ALLINT_XX    : bit_vector ( 7 downto 0)         ;-- int
+signal   INTRQ_XX     : bit                              ;-- int
+signal   INTRQ_RX     : reg_bit                  register;-- int
+
+signal   OVRF_SX      : bit                              ;
+signal   OVRF_XX      : bit                              ;
+signal   OVRF_RX      : reg_bit                  register;
+
+signal   SYSCALL_XX   : bit                              ;
+signal   SYSCALL_RX   : reg_bit                  register;
+
+signal   BREAK_XX     : bit                              ;
+signal   BREAK_RX     : reg_bit                  register;
+
+signal   ILLGINS_XX   : bit                              ;
+signal   ILLGINS_RX   : reg_bit                  register;
+
+signal   CPUNUSE_SX   : bit                              ;
+signal   CPUNUSE_XX   : bit                              ;
+signal   CPUNUSE_RX   : reg_bit                  register;
+
+signal   ILLGIAD_SX   : bit                              ;
+signal   ILLGIAD_XX   : bit                              ;
+signal   ILLGIAD_RX   : reg_bit                  register;
+
+signal   ILLGDWA_SX   : bit                              ;
+signal   ILLGDHA_SX   : bit                              ;
+signal   ILLGDBA_SX   : bit                              ;
+
+signal   ILLGLAD_XX   : bit                              ;
+signal   ILLGLAD_RX   : reg_bit                  register;
+
+signal   ILLGSAD_XX   : bit                              ;
+signal   ILLGSAD_RX   : reg_bit                  register;
+
+signal   IABUSER_SX   : bit                              ;
+signal   IABUSER_XX   : bit                              ;
+signal   IABUSER_RX   : reg_bit                  register;
+
+signal   DABUSER_SX   : bit                              ;
+signal   DABUSER_XX   : bit                              ;
+signal   DABUSER_RX   : reg_bit                  register;
+
+signal   EXC_XX       : bit                              ;-- exc
+signal   LATEEXC_XX   : bit                              ;-- late exc
+signal   EXCRQ_XX     : bit                              ;-- exc
+signal   EXCRQ_RX     : reg_bit                  register;-- exc
+
+signal   EXCCODE_XX   : bit_vector ( 3 downto 0)         ;-- exc code
+
+signal   CAUSE_XX     : bit_vector (31 downto 0)         ;-- cause      reg
+signal   CAUSE_SX     : bit_vector (31 downto 0)         ;-- cause      reg
+signal   CAUSE_RX     : reg_vector (31 downto 0) register;-- cause      reg
+
+signal   STATUS_RX    : reg_vector (31 downto 0) register;-- status     reg
+
+signal   EPC_RX       : reg_vector (31 downto 0) register;--     exp pg cntr
+signal   EEPC_RX      : reg_vector (31 downto 0) register;-- err exp pg cntr
+signal   BADVA_RX     : reg_vector (31 downto 0) register;-- bad adr    reg
+
+signal   EBASE_SX     : bit_vector (31 downto 0)         ;-- exc base   reg
+signal   EBASE_RX     : reg_vector (31 downto 0) register;-- exc base   reg
+
+signal   RESET_RX     : reg_bit                  register;-- reset
+-- 
+
+constant R0_RX        : bit_vector (31 downto 0) := X"00000000"  ;
+constant cpu_nbr      : bit_vector ( 9 downto 0) :=  "0000000000";
+
+constant c0_badvaddr  : bit_vector ( 7 downto 0) := B"01000_000" ;-- badvaddr
+constant c0_status    : bit_vector ( 7 downto 0) := B"01100_000" ;-- status
+constant c0_cause     : bit_vector ( 7 downto 0) := B"01101_000" ;-- cause
+constant c0_epc       : bit_vector ( 7 downto 0) := B"01110_000" ;-- epc
+constant c0_ebase     : bit_vector ( 7 downto 0) := B"01111_001" ;-- ebase
+constant c0_eepc      : bit_vector ( 7 downto 0) := B"11110_000" ;-- err epc
+
+constant cst_0        : bit_vector (31 downto 0) := X"00000000"  ;
+constant cst_1        : bit_vector (31 downto 0) := X"00000001"  ;
+constant cst_2        : bit_vector (31 downto 0) := X"00000002"  ;
+constant cst_4        : bit_vector (31 downto 0) := X"00000004"  ;
+constant cst_8        : bit_vector (31 downto 0) := X"00000008"  ;
+constant cst_16       : bit_vector (31 downto 0) := X"00000010"  ;
+constant cst_24       : bit_vector (31 downto 0) := X"00000018"  ;
+
+constant x_rs         : bit_vector ( 3 downto 0) :=  "0000"      ;
+constant x_rt         : bit_vector ( 3 downto 0) :=  "0001"      ;
+constant x_lo         : bit_vector ( 3 downto 0) :=  "0010"      ;
+constant x_hi         : bit_vector ( 3 downto 0) :=  "0011"      ;
+constant x_dad        : bit_vector ( 3 downto 0) :=  "0100"      ;
+constant x_dot        : bit_vector ( 3 downto 0) :=  "0101"      ;
+constant x_pc         : bit_vector ( 3 downto 0) :=  "0110"      ;
+constant x_cpc        : bit_vector ( 3 downto 0) :=  "0111"      ;
+constant x_ad         : bit_vector ( 3 downto 0) :=  "1000"      ;
+constant x_ir         : bit_vector ( 3 downto 0) :=  "1001"      ;
+constant x_din        : bit_vector ( 3 downto 0) :=  "1010"      ;
+constant x_c16        : bit_vector ( 3 downto 0) :=  "1011"      ;
+constant x_c4         : bit_vector ( 3 downto 0) :=  "1100"      ;
+constant x_c2         : bit_vector ( 3 downto 0) :=  "1101"      ;
+constant x_c1         : bit_vector ( 3 downto 0) :=  "1110"      ;
+constant x_c0         : bit_vector ( 3 downto 0) :=  "1111"      ;
+
+constant y_sr         : bit_vector ( 3 downto 0) :=  "0000"      ;
+constant y_cr         : bit_vector ( 3 downto 0) :=  "0001"      ;
+constant y_ebs        : bit_vector ( 3 downto 0) :=  "0010"      ;
+constant y_bar        : bit_vector ( 3 downto 0) :=  "0011"      ;
+constant y_epc        : bit_vector ( 3 downto 0) :=  "0100"      ;
+constant y_eep        : bit_vector ( 3 downto 0) :=  "0101"      ;
+constant y_dad        : bit_vector ( 3 downto 0) :=  "0110"      ;
+constant y_dot        : bit_vector ( 3 downto 0) :=  "0111"      ;
+constant y_c24        : bit_vector ( 3 downto 0) :=  "1000"      ;
+constant y_c16        : bit_vector ( 3 downto 0) :=  "1001"      ;
+constant y_c8         : bit_vector ( 3 downto 0) :=  "1010"      ;
+constant y_c4         : bit_vector ( 3 downto 0) :=  "1011"      ;
+constant y_c2         : bit_vector ( 3 downto 0) :=  "1100"      ;
+constant y_c1         : bit_vector ( 3 downto 0) :=  "1101"      ;
+constant y_c0         : bit_vector ( 3 downto 0) :=  "1110"      ;
+constant y_cp0        : bit_vector ( 3 downto 0) :=  "1111"      ;
+
+constant a_add        : bit_vector ( 3 downto 0) :=  "0000"      ;
+constant a_sub        : bit_vector ( 3 downto 0) :=  "0001"      ;
+constant a_eq         : bit_vector ( 3 downto 0) :=  "0010"      ;
+constant a_ne         : bit_vector ( 3 downto 0) :=  "0011"      ;
+constant a_lt         : bit_vector ( 3 downto 0) :=  "0100"      ;
+constant a_ltu        : bit_vector ( 3 downto 0) :=  "0101"      ;
+constant a_and        : bit_vector ( 3 downto 0) :=  "0110"      ;
+constant a_or         : bit_vector ( 3 downto 0) :=  "0111"      ;
+constant a_xor        : bit_vector ( 3 downto 0) :=  "1000"      ;
+constant a_nor        : bit_vector ( 3 downto 0) :=  "1001"      ;
+constant a_sll        : bit_vector ( 3 downto 0) :=  "1010"      ;
+constant a_srl        : bit_vector ( 3 downto 0) :=  "1011"      ;
+constant a_sra        : bit_vector ( 3 downto 0) :=  "1100"      ;
+
+constant r_nop        : bit_vector ( 4 downto 0) :=  "0_0000"    ;
+constant r_rt         : bit_vector ( 4 downto 0) :=  "0_0001"    ;
+constant r_rd         : bit_vector ( 4 downto 0) :=  "0_0010"    ;
+constant r_r31        : bit_vector ( 4 downto 0) :=  "0_0011"    ;
+constant r_lo         : bit_vector ( 4 downto 0) :=  "0_0100"    ;
+constant r_hi         : bit_vector ( 4 downto 0) :=  "0_0101"    ;
+constant r_dad        : bit_vector ( 4 downto 0) :=  "0_1000"    ;
+constant r_pc         : bit_vector ( 4 downto 0) :=  "0_1001"    ;
+constant r_dot        : bit_vector ( 4 downto 0) :=  "0_1011"    ;
+constant r_cr         : bit_vector ( 4 downto 0) :=  "1_0000"    ;
+constant r_xcr        : bit_vector ( 4 downto 0) :=  "1_0001"    ;
+constant r_sr         : bit_vector ( 4 downto 0) :=  "1_0010"    ;
+constant r_epc        : bit_vector ( 4 downto 0) :=  "1_0100"    ;
+constant r_eep        : bit_vector ( 4 downto 0) :=  "1_0110"    ;
+constant r_ebs        : bit_vector ( 4 downto 0) :=  "1_1000"    ;
+constant r_bva        : bit_vector ( 4 downto 0) :=  "1_1010"    ;
+constant r_cp0        : bit_vector ( 4 downto 0) :=  "1_1111"    ;
+
+constant m_nop        : bit_vector ( 3 downto 0) :=  "0000"      ;-- no  op
+constant m_rdw        : bit_vector ( 3 downto 0) :=  "0001"      ;-- red wrd
+constant m_rdi        : bit_vector ( 3 downto 0) :=  "0010"      ;-- red inst
+constant m_rlw        : bit_vector ( 3 downto 0) :=  "0011"      ;-- red lkd
+constant m_rxr        : bit_vector ( 3 downto 0) :=  "0100"      ;-- red x reg
+constant m_wtw        : bit_vector ( 3 downto 0) :=  "0101"      ;-- wrt wrd
+constant m_wth        : bit_vector ( 3 downto 0) :=  "0110"      ;-- wrt hlf
+constant m_wtb        : bit_vector ( 3 downto 0) :=  "0111"      ;-- wrt byt
+constant m_wlw        : bit_vector ( 3 downto 0) :=  "1000"      ;-- wrt lkd
+constant m_wxr        : bit_vector ( 3 downto 0) :=  "1001"      ;-- wrt x reg
+constant m_lkr        : bit_vector ( 3 downto 0) :=  "1010"      ;-- reset lkd
+
+constant e_nop        : bit_vector ( 3 downto 0) :=  "0000"      ;-- no op
+constant e_ovr        : bit_vector ( 3 downto 0) :=  "0001"      ;-- overflow
+constant e_sys        : bit_vector ( 3 downto 0) :=  "0010"      ;-- syscall
+constant e_brk        : bit_vector ( 3 downto 0) :=  "0011"      ;-- break
+constant e_iia        : bit_vector ( 3 downto 0) :=  "0100"      ;-- inst  adr
+constant e_ilw        : bit_vector ( 3 downto 0) :=  "0101"      ;-- load  wrd
+constant e_ilh        : bit_vector ( 3 downto 0) :=  "0110"      ;-- load  hlf
+constant e_ilb        : bit_vector ( 3 downto 0) :=  "0111"      ;-- load  byt
+constant e_isw        : bit_vector ( 3 downto 0) :=  "1000"      ;-- store wrd
+constant e_ish        : bit_vector ( 3 downto 0) :=  "1001"      ;-- store hlf
+constant e_isb        : bit_vector ( 3 downto 0) :=  "1010"      ;-- store byt
+constant e_unk        : bit_vector ( 3 downto 0) :=  "1011"      ;-- unknown
+constant e_cop        : bit_vector ( 3 downto 0) :=  "1100"      ;-- copro
+constant e_ibe        : bit_vector ( 3 downto 0) :=  "1101"      ;-- bus error
+constant e_dbe        : bit_vector ( 3 downto 0) :=  "1110"      ;-- bus error
+constant e_clr        : bit_vector ( 3 downto 0) :=  "1111"      ;-- clear
+
+constant s_jmp        : bit_vector ( 4 downto 0) :=  "0_0000"    ;-- jump
+constant s_opc        : bit_vector ( 4 downto 0) :=  "0_0001"    ;-- codop
+constant s_fun        : bit_vector ( 4 downto 0) :=  "0_0010"    ;-- function
+constant s_ad2        : bit_vector ( 4 downto 0) :=  "0_0011"    ;-- adr
+constant s_exc        : bit_vector ( 4 downto 0) :=  "0_1111"    ;-- exc
+constant s_eqz        : bit_vector ( 4 downto 0) :=  "1_0000"    ;--     eq 0
+constant s_nez        : bit_vector ( 4 downto 0) :=  "1_0001"    ;-- not eq 0
+constant s_lt         : bit_vector ( 4 downto 0) :=  "1_0010"    ;--     lt
+constant s_ge         : bit_vector ( 4 downto 0) :=  "1_0011"    ;-- not lt
+constant s_f10        : bit_vector ( 4 downto 0) :=  "1_0100"    ;-- fun 1 0
+constant s_f32        : bit_vector ( 4 downto 0) :=  "1_0101"    ;-- fun 3 2
+constant s_f54        : bit_vector ( 4 downto 0) :=  "1_0110"    ;-- fun 5 4
+constant s_s10        : bit_vector ( 4 downto 0) :=  "1_1000"    ;-- rs  1 0
+constant s_s32        : bit_vector ( 4 downto 0) :=  "1_1001"    ;-- rs  3 2
+constant s_s4         : bit_vector ( 4 downto 0) :=  "1_1010"    ;-- rs    4
+constant s_t10        : bit_vector ( 4 downto 0) :=  "1_1100"    ;-- rt  1 0
+constant s_t32        : bit_vector ( 4 downto 0) :=  "1_1101"    ;-- rt  3 2
+constant s_t4         : bit_vector ( 4 downto 0) :=  "1_1110"    ;-- rt    4
+
+constant u_opcd       : bit_vector (11 downto 0) := O"2000"      ;-- opcod
+
+constant u_spec       : bit_vector (11 downto 0) := O"2000"      ;-- special
+
+constant u_bcnd0      : bit_vector (11 downto 0) := O"2010"      ;-- bcond
+constant u_bcnd1      : bit_vector (11 downto 0) := O"2014"      ;-- bcond
+constant u_blt0       : bit_vector (11 downto 0) := O"2064"      ;-- bltz-al
+constant u_bge0       : bit_vector (11 downto 0) := O"2065"      ;-- bgez-al
+constant u_blg0       : bit_vector (11 downto 0) := O"2074"      ;-- blt-bge
+constant u_blgl0      : bit_vector (11 downto 0) := O"2075"      ;-- bltl-bgel
+constant u_blgl1      : bit_vector (11 downto 0) := O"2076"      ;-- bltl-bgel
+constant u_blgl2      : bit_vector (11 downto 0) := O"2077"      ;-- bltl-bgel
+
+constant u_func       : bit_vector (11 downto 0) := O"1000"      ;-- function
+
+constant u_sll0       : bit_vector (11 downto 0) := O"1000"      ;-- sll
+constant u_sll1       : bit_vector (11 downto 0) := O"1001"      ;-- sll
+constant u_sll2       : bit_vector (11 downto 0) := O"1002"      ;-- sll
+
+constant u_srl0       : bit_vector (11 downto 0) := O"1020"      ;-- srl
+constant u_srl1       : bit_vector (11 downto 0) := O"1021"      ;-- srl
+constant u_srl2       : bit_vector (11 downto 0) := O"1022"      ;-- srl
+
+constant u_sra0       : bit_vector (11 downto 0) := O"1030"      ;-- sra
+constant u_sra1       : bit_vector (11 downto 0) := O"1031"      ;-- sra
+constant u_sra2       : bit_vector (11 downto 0) := O"1032"      ;-- sra
+
+constant u_sllv0      : bit_vector (11 downto 0) := O"1040"      ;-- sllv
+
+constant u_srlv0      : bit_vector (11 downto 0) := O"1060"      ;-- srlv
+
+constant u_srav0      : bit_vector (11 downto 0) := O"1070"      ;-- srav
+
+constant u_jr0        : bit_vector (11 downto 0) := O"1100"      ;-- jr
+
+constant u_jlr0       : bit_vector (11 downto 0) := O"1110"      ;-- jalr
+constant u_jlr1       : bit_vector (11 downto 0) := O"1111"      ;-- jalr
+constant u_jlr2       : bit_vector (11 downto 0) := O"1112"      ;-- jalr
+
+constant u_sysc0      : bit_vector (11 downto 0) := O"1140"      ;-- syscall
+constant u_sybk0      : bit_vector (11 downto 0) := O"1141"      ;-- sys brk
+
+constant u_brk0       : bit_vector (11 downto 0) := O"1150"      ;-- break
+
+constant u_add0       : bit_vector (11 downto 0) := O"1400"      ;-- add
+constant u_arit0      : bit_vector (11 downto 0) := O"1401"      ;-- arith
+constant u_wrtrd      : bit_vector (11 downto 0) := O"1402"      ;-- write rd
+
+constant u_addu0      : bit_vector (11 downto 0) := O"1410"      ;-- addu
+
+constant u_sub0       : bit_vector (11 downto 0) := O"1420"      ;-- sub
+
+constant u_subu0      : bit_vector (11 downto 0) := O"1430"      ;-- subu
+
+constant u_and0       : bit_vector (11 downto 0) := O"1440"      ;-- and
+
+constant u_or0        : bit_vector (11 downto 0) := O"1450"      ;-- or
+
+constant u_xor0       : bit_vector (11 downto 0) := O"1460"      ;-- xor
+
+constant u_nor0       : bit_vector (11 downto 0) := O"1470"      ;-- nor
+
+constant u_slt0       : bit_vector (11 downto 0) := O"1520"      ;-- slt
+
+constant u_sltu0      : bit_vector (11 downto 0) := O"1530"      ;-- slu
+
+constant u_reset      : bit_vector (11 downto 0) := O"0000"      ;-- reset
+constant u_rst1       : bit_vector (11 downto 0) := O"0001"      ;-- reset
+constant u_rst2       : bit_vector (11 downto 0) := O"0002"      ;-- reset
+constant u_rst3       : bit_vector (11 downto 0) := O"0003"      ;-- reset
+constant u_rst4       : bit_vector (11 downto 0) := O"0004"      ;-- reset
+constant u_rst5       : bit_vector (11 downto 0) := O"0005"      ;-- reset
+constant u_rst6       : bit_vector (11 downto 0) := O"0006"      ;-- reset
+constant u_rst7       : bit_vector (11 downto 0) := O"0007"      ;-- reset
+constant u_rst8       : bit_vector (11 downto 0) := O"0010"      ;-- reset
+constant u_rst9       : bit_vector (11 downto 0) := O"0011"      ;-- reset
+constant u_rst10      : bit_vector (11 downto 0) := O"0012"      ;-- reset
+constant u_rst11      : bit_vector (11 downto 0) := O"0013"      ;-- reset
+
+constant u_init       : bit_vector (11 downto 0) := O"0020"      ;-- inst
+
+constant u_ex0        : bit_vector (11 downto 0) := O"0021"      ;-- exception
+constant u_ex1        : bit_vector (11 downto 0) := O"0022"      ;-- exception
+constant u_ex2        : bit_vector (11 downto 0) := O"0023"      ;-- exception
+constant u_ex3        : bit_vector (11 downto 0) := O"0024"      ;-- exception
+constant u_ex4        : bit_vector (11 downto 0) := O"0025"      ;-- exception
+constant u_ex5        : bit_vector (11 downto 0) := O"0026"      ;-- exception
+constant u_ex6        : bit_vector (11 downto 0) := O"0027"      ;-- exception
+constant u_ex7        : bit_vector (11 downto 0) := O"0030"      ;-- exception
+constant u_ex8        : bit_vector (11 downto 0) := O"0031"      ;-- exception
+constant u_ex9        : bit_vector (11 downto 0) := O"0032"      ;-- exception
+constant u_ex10       : bit_vector (11 downto 0) := O"0033"      ;-- exception
+constant u_ex11       : bit_vector (11 downto 0) := O"0034"      ;-- exception
+constant u_ex12       : bit_vector (11 downto 0) := O"0035"      ;-- exception
+constant u_ex13       : bit_vector (11 downto 0) := O"0036"      ;-- exception
+constant u_ex14       : bit_vector (11 downto 0) := O"0037"      ;-- exception
+
+constant u_ex0f0      : bit_vector (11 downto 0) := O"0040"      ;-- exception
+constant u_ex0t0      : bit_vector (11 downto 0) := O"0041"      ;-- exception
+constant u_ex0f1      : bit_vector (11 downto 0) := O"0042"      ;-- exception
+constant u_ex0t1      : bit_vector (11 downto 0) := O"0043"      ;-- exception
+constant u_ex0f2      : bit_vector (11 downto 0) := O"0044"      ;-- exception
+constant u_ex0t2      : bit_vector (11 downto 0) := O"0045"      ;-- exception
+constant u_ex0f3      : bit_vector (11 downto 0) := O"0046"      ;-- exception
+constant u_ex0t3      : bit_vector (11 downto 0) := O"0047"      ;-- exception
+constant u_ex0t4      : bit_vector (11 downto 0) := O"0050"      ;-- exception
+constant u_ex0t5      : bit_vector (11 downto 0) := O"0051"      ;-- exception
+
+constant u_ex1f0      : bit_vector (11 downto 0) := O"0054"      ;-- exception
+constant u_ex1t0      : bit_vector (11 downto 0) := O"0055"      ;-- exception
+
+constant u_j0         : bit_vector (11 downto 0) := O"2020"      ;-- j
+constant u_j1         : bit_vector (11 downto 0) := O"2021"      ;-- j
+constant u_j2         : bit_vector (11 downto 0) := O"2022"      ;-- j
+constant u_j3         : bit_vector (11 downto 0) := O"2023"      ;-- j
+constant u_j4         : bit_vector (11 downto 0) := O"2024"      ;-- j
+constant u_j5         : bit_vector (11 downto 0) := O"2025"      ;-- j
+
+constant u_jal0       : bit_vector (11 downto 0) := O"2030"      ;-- jal
+constant u_jal1       : bit_vector (11 downto 0) := O"2031"      ;-- jal
+constant u_jal2       : bit_vector (11 downto 0) := O"2032"      ;-- jal
+constant u_jal3       : bit_vector (11 downto 0) := O"2033"      ;-- jal
+constant u_jal4       : bit_vector (11 downto 0) := O"2034"      ;-- jal
+constant u_jal5       : bit_vector (11 downto 0) := O"2035"      ;-- jal
+
+constant u_bjl0       : bit_vector (11 downto 0) := O"2036"      ;-- bch - jal
+constant u_bjl1       : bit_vector (11 downto 0) := O"2037"      ;-- bch - jal
+constant u_bjl2       : bit_vector (11 downto 0) := O"2026"      ;-- bch - jal
+
+constant u_beq0       : bit_vector (11 downto 0) := O"2040"      ;-- beq
+constant u_beq1       : bit_vector (11 downto 0) := O"2041"      ;-- beq
+
+constant u_bch0       : bit_vector (11 downto 0) := O"2042"      ;-- branch
+constant u_bch1       : bit_vector (11 downto 0) := O"2043"      ;-- branch
+constant u_bch2       : bit_vector (11 downto 0) := O"2044"      ;-- branch
+constant u_bch3       : bit_vector (11 downto 0) := O"2045"      ;-- branch
+constant u_bch4       : bit_vector (11 downto 0) := O"2046"      ;-- branch
+
+constant u_bne0       : bit_vector (11 downto 0) := O"2050"      ;-- bne
+constant u_bne1       : bit_vector (11 downto 0) := O"2051"      ;-- bne
+
+constant u_bj0        : bit_vector (11 downto 0) := O"2052"      ;-- bch - jmp
+constant u_bj1        : bit_vector (11 downto 0) := O"2053"      ;-- bch - jmp
+constant u_bj2        : bit_vector (11 downto 0) := O"2054"      ;-- bch - jmp
+
+constant u_ble0       : bit_vector (11 downto 0) := O"2060"      ;-- blez
+constant u_ble1       : bit_vector (11 downto 0) := O"2061"      ;-- blez
+constant u_ble2       : bit_vector (11 downto 0) := O"2062"      ;-- blez
+
+constant u_bgt0       : bit_vector (11 downto 0) := O"2070"      ;-- bgtz
+constant u_bgt1       : bit_vector (11 downto 0) := O"2071"      ;-- bgtz
+constant u_bgt2       : bit_vector (11 downto 0) := O"2072"      ;-- bgtz
+
+constant u_adi0       : bit_vector (11 downto 0) := O"2100"      ;-- addi
+constant u_adi1       : bit_vector (11 downto 0) := O"2101"      ;-- addi
+constant u_adi2       : bit_vector (11 downto 0) := O"2102"      ;-- addi
+constant u_adi3       : bit_vector (11 downto 0) := O"2103"      ;-- addi
+
+constant u_adiu0      : bit_vector (11 downto 0) := O"2110"      ;-- addiu
+constant u_adiu1      : bit_vector (11 downto 0) := O"2111"      ;-- addiu
+constant u_adiu2      : bit_vector (11 downto 0) := O"2112"      ;-- addiu
+
+constant u_sti0       : bit_vector (11 downto 0) := O"2120"      ;-- slti
+constant u_sti1       : bit_vector (11 downto 0) := O"2121"      ;-- slti
+constant u_sti2       : bit_vector (11 downto 0) := O"2122"      ;-- slti
+
+constant u_stiu0      : bit_vector (11 downto 0) := O"2130"      ;-- sltiu
+constant u_stiu1      : bit_vector (11 downto 0) := O"2131"      ;-- sltiu
+constant u_stiu2      : bit_vector (11 downto 0) := O"2132"      ;-- sltiu
+
+constant u_andi0      : bit_vector (11 downto 0) := O"2140"      ;-- andi
+constant u_andi1      : bit_vector (11 downto 0) := O"2141"      ;-- andi
+constant u_andi2      : bit_vector (11 downto 0) := O"2142"      ;-- andi
+
+constant u_ori0       : bit_vector (11 downto 0) := O"2150"      ;-- ori
+constant u_ori1       : bit_vector (11 downto 0) := O"2151"      ;-- ori
+constant u_ori2       : bit_vector (11 downto 0) := O"2152"      ;-- ori
+
+constant u_xori0      : bit_vector (11 downto 0) := O"2160"      ;-- xori
+constant u_xori1      : bit_vector (11 downto 0) := O"2161"      ;-- xori
+constant u_xori2      : bit_vector (11 downto 0) := O"2162"      ;-- xori
+
+constant u_lui0       : bit_vector (11 downto 0) := O"2170"      ;-- lui
+constant u_lui1       : bit_vector (11 downto 0) := O"2171"      ;-- lui
+
+constant u_cp00       : bit_vector (11 downto 0) := O"2200"      ;-- cop0
+constant u_cp01       : bit_vector (11 downto 0) := O"2204"      ;-- cop0
+constant u_cpc00      : bit_vector (11 downto 0) := O"2205"      ;-- c0 cp0
+constant u_cpc01      : bit_vector (11 downto 0) := O"0210"      ;-- c0 cp0
+constant u_cpc02      : bit_vector (11 downto 0) := O"0214"      ;-- c0 cp0
+constant u_cpc03      : bit_vector (11 downto 0) := O"0216"      ;-- c0 cp0
+constant u_cpc04      : bit_vector (11 downto 0) := O"0220"      ;-- c0 cp0
+constant u_eret0      : bit_vector (11 downto 0) := O"0221"      ;-- eret
+constant u_eret1      : bit_vector (11 downto 0) := O"0230"      ;-- eret
+constant u_eret6      : bit_vector (11 downto 0) := O"0231"      ;-- eret
+constant u_eret2      : bit_vector (11 downto 0) := O"0232"      ;-- eret
+constant u_eret3      : bit_vector (11 downto 0) := O"0233"      ;-- eret
+constant u_eret4      : bit_vector (11 downto 0) := O"0234"      ;-- eret
+constant u_eret5      : bit_vector (11 downto 0) := O"0235"      ;-- eret
+constant u_mc00       : bit_vector (11 downto 0) := O"2204"      ;-- mv cp0
+constant u_mc01       : bit_vector (11 downto 0) := O"0200"      ;-- mv cp0
+constant u_mc02       : bit_vector (11 downto 0) := O"0204"      ;-- mv cp0
+constant u_mfc00      : bit_vector (11 downto 0) := O"0204"      ;-- mfc0
+constant u_mtc00      : bit_vector (11 downto 0) := O"0205"      ;-- mtc0
+
+constant u_lb0        : bit_vector (11 downto 0) := O"2400"      ;-- lb
+constant u_lb1        : bit_vector (11 downto 0) := O"2401"      ;-- lb
+constant u_lb2        : bit_vector (11 downto 0) := O"2402"      ;-- lb
+constant u_lb3        : bit_vector (11 downto 0) := O"2403"      ;-- lb
+constant u_lb4        : bit_vector (11 downto 0) := O"2404"      ;-- lb
+constant u_lb5        : bit_vector (11 downto 0) := O"2405"      ;-- lb
+constant u_lb6        : bit_vector (11 downto 0) := O"2406"      ;-- lb
+constant u_lb7        : bit_vector (11 downto 0) := O"2407"      ;-- lb
+
+constant u_lh0        : bit_vector (11 downto 0) := O"2410"      ;-- lh
+constant u_lh1        : bit_vector (11 downto 0) := O"2411"      ;-- lh
+constant u_lh2        : bit_vector (11 downto 0) := O"2412"      ;-- lh
+constant u_lh3        : bit_vector (11 downto 0) := O"2413"      ;-- lh
+constant u_lh4        : bit_vector (11 downto 0) := O"2414"      ;-- lh
+constant u_lh5        : bit_vector (11 downto 0) := O"2415"      ;-- lh
+constant u_lh6        : bit_vector (11 downto 0) := O"2416"      ;-- lh
+constant u_lh7        : bit_vector (11 downto 0) := O"2417"      ;-- lh
+
+constant u_lw0        : bit_vector (11 downto 0) := O"2430"      ;-- lw
+constant u_lw1        : bit_vector (11 downto 0) := O"2431"      ;-- lw
+constant u_lw2        : bit_vector (11 downto 0) := O"2432"      ;-- lw
+constant u_lw3        : bit_vector (11 downto 0) := O"2433"      ;-- lw
+constant u_lw4        : bit_vector (11 downto 0) := O"2434"      ;-- lw
+constant u_lw5        : bit_vector (11 downto 0) := O"2435"      ;-- lw
+
+constant u_lbu0       : bit_vector (11 downto 0) := O"2440"      ;-- lbu
+constant u_lbu1       : bit_vector (11 downto 0) := O"2441"      ;-- lbu
+constant u_lbu2       : bit_vector (11 downto 0) := O"2442"      ;-- lbu
+constant u_lbu3       : bit_vector (11 downto 0) := O"2443"      ;-- lbu
+constant u_lbu4       : bit_vector (11 downto 0) := O"2444"      ;-- lbu
+constant u_lbu5       : bit_vector (11 downto 0) := O"2445"      ;-- lbu
+constant u_lbu6       : bit_vector (11 downto 0) := O"2446"      ;-- lbu
+constant u_lbu7       : bit_vector (11 downto 0) := O"2447"      ;-- lbu
+
+constant u_lhu0       : bit_vector (11 downto 0) := O"2450"      ;-- lhu
+constant u_lhu1       : bit_vector (11 downto 0) := O"2451"      ;-- lhu
+constant u_lhu2       : bit_vector (11 downto 0) := O"2452"      ;-- lhu
+constant u_lhu3       : bit_vector (11 downto 0) := O"2453"      ;-- lhu
+constant u_lhu4       : bit_vector (11 downto 0) := O"2454"      ;-- lhu
+constant u_lhu5       : bit_vector (11 downto 0) := O"2455"      ;-- lhu
+constant u_lhu6       : bit_vector (11 downto 0) := O"2456"      ;-- lhu
+constant u_lhu7       : bit_vector (11 downto 0) := O"2457"      ;-- lhu
+
+constant u_sb0        : bit_vector (11 downto 0) := O"2500"      ;-- sb
+constant u_sb1        : bit_vector (11 downto 0) := O"2501"      ;-- sb
+constant u_sb2        : bit_vector (11 downto 0) := O"2502"      ;-- sb
+constant u_sb3        : bit_vector (11 downto 0) := O"2503"      ;-- sb
+constant u_sb4        : bit_vector (11 downto 0) := O"2504"      ;-- sb
+
+constant u_sh0        : bit_vector (11 downto 0) := O"2510"      ;-- sh
+constant u_sh1        : bit_vector (11 downto 0) := O"2511"      ;-- sh
+constant u_sh2        : bit_vector (11 downto 0) := O"2512"      ;-- sh
+constant u_sh3        : bit_vector (11 downto 0) := O"2513"      ;-- sh
+constant u_sh4        : bit_vector (11 downto 0) := O"2514"      ;-- sh
+
+constant u_sw0        : bit_vector (11 downto 0) := O"2530"      ;-- sw
+constant u_sw1        : bit_vector (11 downto 0) := O"2531"      ;-- sw
+constant u_sw2        : bit_vector (11 downto 0) := O"2532"      ;-- sw
+constant u_sw3        : bit_vector (11 downto 0) := O"2533"      ;-- sw
+constant u_sw4        : bit_vector (11 downto 0) := O"2534"      ;-- sw
+constant u_stor0      : bit_vector (11 downto 0) := O"2535"      ;-- store
+
+-- 
+
+	-- ### ------------------------------------------------------ ###
+	-- #   instruction set table :					#
+	-- #								#
+	-- #     Opcods in lower case are Mips-32 instructions		#
+	-- #     Opcods in upper case are application specific		#
+	-- #								#
+	-- #								#
+	-- #   primary opcod (31 downto 26) :				#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 |speci|bcond|  j  | jal | beq | bne |blez |bgtz |	#
+	-- #   1 |addi |addiu|slti |sltiu|andi | ori |xori | lui |	#
+	-- #   2 |cop0 |  +  |cop2 |  +  |  +  |  +  |  +  |  +  |	#
+	-- #   3 |     |     |     |     |  +  |  +  |     |  +  |	#
+	-- #   4 | lb  | lh  |  +  | lw  | lbu | lhu |  +  |     |	#
+	-- #   5 | sb  | sh  |  +  | sw  |     |     |  +  |  +  |	#
+	-- #   6 | ll  |  +  |  +  |  +  |     |  +  |  +  |     |	#
+	-- #   7 | sc  |  +  |  +  |  +  |     |  +  |  +  |     |	#
+	-- #								#
+	-- #								#
+	-- #   special opcod extension (5 downto 0) :			#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 | *** |  +  | srl | sra |sllv |     |srlv |srav |	#
+	-- #   1 | jr  |jalr |  +  |  +  |sysca|break|     |sync |	#
+	-- #   2 |mfhi |mthi |mflo |mtlo |     |     |     |     |	#
+	-- #   3 |  +  |  +  |  +  |  +  |     |     |     |     |	#
+	-- #   4 | add |addu | sub |subu | and | or  | xor | nor |	#
+	-- #   5 |     |     | slt |sltu |     |     |     |     |	#
+	-- #   6 | tge |tgeu | tlt |tltu | teq |     | tne |     |	#
+	-- #   7 |     |     |     |     |  +  |  +  |  +  |  +  |	#
+	-- #								#
+	-- #   *** : Specific rt, rd, and sham make the distinction	#
+	-- #         between sll					#
+	-- #                nop : sll r0, r0, 0				#
+	-- #                ehb : sll r0, r0, 3				#
+	-- #								#
+	-- #   bcond opcod extension (20 downto 16) :			#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 |bltz |bgez |  +  |  +  |     |     |     |     |	#
+	-- #   1 |tgei |tgeiu|tlti |tltiu|teqi |     |tnei |     |	#
+	-- #   2 |bltza|bgeza|  +  |  +  |     |     |     |     |	#
+	-- #   3 |     |     |     |     |     |     |     |  +  |	#
+	-- #								#
+	-- #								#
+	-- #   cop0 opcod extension (25 downto 21) :			#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 |mfc0 |     |  +  |  +  |mtc0 |     |  +  |  +  |	#
+	-- #   1 |  +  |  +  |  +  |  +  |  +  |  +  |  +  |  +  |	#
+	-- #   2 | c0  | c0  | c0  | c0  | c0  | c0  | c0  | c0  |	#
+	-- #   3 | c0  | c0  | c0  | c0  | c0  | c0  | c0  | c0  |	#
+	-- #								#
+	-- #								#
+	-- #   c0 cop0 extension extension (5 downto 0) :		#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 |     |  +  |  +  |     |     |     |  +  |     |	#
+	-- #   1 |  +  |     |     |     |     |     |     |     |	#
+	-- #   2 |  +  |     |     |     |     |     |     |     |	#
+	-- #   3 |eret |     |     |     |     |     |     |  +  |	#
+	-- #   4 |wait |     |     |     |     |     |     |     |	#
+	-- #   5 |     |     |     |     |     |     |     |     |	#
+	-- #   6 |     |     |     |     |     |     |     |     |	#
+	-- #   7 |     |     |     |     |     |     |     |     |	#
+	-- #								#
+	-- #								#
+	-- #   cop2 opcod extension (25 downto 21) :			#
+	-- #     |  0     1     2     3     4     5     6     7		#
+	-- #   --+-----+-----+-----+-----+-----+-----+-----+-----+	#
+	-- #   0 |mfc2 |     |  +  |  +  |mtc2 |     |  +  |  +  |	#
+	-- #   1 |  +  |  +  |  +  |  +  |  +  |  +  |  +  |  +  |	#
+	-- #   2 |  +  |  +  |  +  |  +  |  +  |  +  |  +  |  +  |	#
+	-- #   3 |  +  |  +  |  +  |  +  |  +  |  +  |  +  |  +  |	#
+	-- #								#
+	-- ### ------------------------------------------------------ ###
+--
+
+begin
+
+-- ### -------------------------------------------------------------- ###
+-- #   internal description :						#
+-- #									#
+-- #   The following lines describes in details an implementation of	#
+-- #   the Mips-32 Risc architecture.					#
+-- #									#
+-- #   The description does not include cache memories, nor virtual	#
+-- #   to real address translation mechanism (virtual memory not	#
+-- #   supported).							#
+-- #									#
+-- #   The description contains only integer instructions excluding	#
+-- #   multiply and divide instructions.				#
+-- #									#
+-- #   The implementation includes :					#
+-- #     o R0 ... R31 : 32 integer registers organized as a register	#
+-- #                    file (2 read and 1 write access)		#
+-- #     o HI and LO  : 2 named integer registers			#
+-- #									#
+-- #   and the following coprocessor zero's registers :			#
+-- #     o BADVA      : Bad Virtual Address Register			#
+-- #     o COUNT      : Count Register					#
+-- #     o STATUS     : Status Register					#
+-- #     o CAUSE      : Cause Register					#
+-- #     o EPC        : Exception Program Counter			#
+-- #     o PRID       : Processor Revision Identifier Register		#
+-- #     o EBASE      : Exception Base Register				#
+-- #     o EEPC       : Error Exception Program Counter			#
+-- #									#
+-- #   The other registers of the coprocessor zero are not implemented.	#
+-- #									#
+-- #   Registers are synchronized on the rising edge of the clock.	#
+-- ### -------------------------------------------------------------- ###
+--
+
+	-- ### ------------------------------------------------------ ###
+	-- #   check power supplies					#
+	-- ### ------------------------------------------------------ ###
+
+CHECK_POWER : assert  (((VDD and VDDP) = '1') and ((VSS or VSSP) = '0'))
+              report  "missing power supply on processor"
+              severity WARNING;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   internal clocks						#
+	-- ### ------------------------------------------------------ ###
+
+CK_SX      <= CK;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   external (hardware) interrupts :				#
+	-- #     convert to positive logic				#
+	-- ### ------------------------------------------------------ ###
+
+IT_XX      <= not IT_N;
+
+	-- ### ------------------------------------------------------ ###
+	-- ### ------------------------------------------------------ ###
+
+DIN_SX     <= D_IN;
+
+	-- ### ------------------------------------------------------ ###
+	-- ### ------------------------------------------------------ ###
+
+OPC_SX     <= I_RX (31 downto 26);
+RS_SX      <= I_RX (25 downto 21);
+RT_SX      <= I_RX (20 downto 16);
+RD_SX      <= I_RX (15 downto 11);
+SHAM_SX    <= I_RX (10 downto  6);
+FUN_SX     <= I_RX ( 5 downto  0);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction					#
+	-- #								#
+	-- #     - x operand                                  ( 4 bits)	#
+	-- #     - y operand                                  ( 4 bits)	#
+	-- #     - operating unit                             ( 4 bits)	#
+	-- #     - saving the operation's result              ( 5 bits)	#
+	-- #     - memory access                              ( 4 bits)	#
+	-- #     - exception                                  ( 4 bits)	#
+	-- #     - micro-sequencer                            ( 5 bits)	#
+	-- #     - micro-address                              (12 bits)	#
+	-- ### ------------------------------------------------------ ###
+
+with UADR_SX select
+UINS_SX  <=
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_clr & s_jmp & u_rst1  when u_reset,
+  x_cpc & y_c0  & a_add & r_eep & m_nop & e_nop & s_jmp & u_rst2  when u_rst1 ,
+  x_c0  & y_c0  & a_add & r_cr  & m_nop & e_nop & s_jmp & u_rst3  when u_rst2 ,
+  x_c4  & y_c16 & a_sll & r_dad & m_nop & e_nop & s_jmp & u_rst4  when u_rst3 ,
+  x_dad & y_c4  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_rst5  when u_rst4 ,
+  x_dad & y_c4  & a_or  & r_sr  & m_nop & e_nop & s_jmp & u_rst6  when u_rst5 ,
+
+  x_c4  & y_c8  & a_add & r_dad & m_nop & e_nop & s_jmp & u_rst7  when u_rst6 ,
+  x_dad & y_c8  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_rst8  when u_rst7 ,
+  x_dad & y_c4  & a_sub & r_dad & m_nop & e_nop & s_jmp & u_rst9  when u_rst8 ,
+  x_dad & y_c16 & a_sll & r_dad & m_nop & e_nop & s_jmp & u_rst10 when u_rst9 ,
+  x_dad & y_c4  & a_sll & r_pc  & m_nop & e_nop & s_jmp & u_rst11 when u_rst10,
+  x_c0  & y_c0  & a_add & r_ebs & m_rdi & e_ibe & s_exc & u_init  when u_rst11,
+
+  x_pc  & y_c4  & a_add & r_pc  & m_nop & e_nop & s_opc & u_opcd  when u_init ,
+  x_rt  & y_c0  & a_add & r_dad & m_nop & e_nop & s_fun & u_func  when u_spec ,
+
+  x_c0  & y_c0  & a_add & r_xcr & m_nop & e_clr & s_jmp & u_ex1   when u_ex0  ,
+  x_c4  & y_c16 & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex2   when u_ex1  ,
+  x_dad & y_sr  & a_and & r_dad & m_nop & e_nop & s_jmp & u_ex3   when u_ex2  ,
+  x_cpc & y_c0  & a_add & r_epc & m_nop & e_nop & s_eqz & u_ex0f0 when u_ex3  ,
+
+  x_c4  & y_c8  & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex0t1 when u_ex0t0,
+  x_dad & y_c8  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex0t2 when u_ex0t1,
+  x_dad & y_c4  & a_sub & r_dad & m_nop & e_nop & s_jmp & u_ex0t3 when u_ex0t2,
+  x_dad & y_c16 & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex0t4 when u_ex0t3,
+  x_dad & y_c16 & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex0t5 when u_ex0t4,
+  x_dad & y_c16 & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex4   when u_ex0t5,
+
+  x_c0  & y_ebs & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex0f1 when u_ex0f0,
+  x_dad & y_c8  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_ex0f2 when u_ex0f1,
+  x_dad & y_c4  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_ex0f3 when u_ex0f2,
+  x_dad & y_c8  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex4   when u_ex0f3,
+
+  x_dad & y_c24 & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex5   when u_ex4  ,
+  x_dad & y_c4  & a_sll & r_pc  & m_nop & e_nop & s_jmp & u_ex6   when u_ex5  ,
+
+  x_c0  & y_sr  & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex7   when u_ex6  ,
+  x_dad & y_c2  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_ex8   when u_ex7  ,
+  x_dad & y_c2  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex9   when u_ex8  ,
+  x_dad & y_c2  & a_or  & r_sr  & m_nop & e_nop & s_jmp & u_ex10  when u_ex9  ,
+
+  x_c0  & y_cr  & a_add & r_dad & m_nop & e_nop & s_jmp & u_ex11  when u_ex10 ,
+  x_dad & y_c2  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex12  when u_ex11 ,
+  x_dad & y_c1  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_ex13  when u_ex12 ,
+  x_dad & y_c2  & a_and & r_dad & m_nop & e_nop & s_jmp & u_ex14  when u_ex13 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_eqz & u_ex1f0 when u_ex14 ,
+
+  x_ad  & y_c0  & a_add & r_bva & m_nop & e_nop & s_jmp & u_ex1f0 when u_ex1t0,
+  x_c0  & y_c0  & a_add & r_nop & m_rdi & e_ibe & s_exc & u_init  when u_ex1f0,
+
+  x_rs  & y_c0  & a_lt  & r_dad & m_nop & e_nop & s_t32 & u_bcnd1 when u_bcnd0,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_t10 & u_blt0  when u_bcnd1,
+  x_c0  & y_dad & a_sub & r_dad & m_nop & e_nop & s_t4  & u_blg0  when u_blt0 ,
+  x_dad & y_c1  & a_xor & r_dad & m_nop & e_nop & s_jmp & u_blt0  when u_bge0 ,
+  x_ir  & y_dad & a_and & r_dad & m_nop & e_nop & s_jmp & u_bch2  when u_blg0 ,
+
+  x_ir  & y_dad & a_and & r_dad & m_nop & e_nop & s_jmp & u_blgl1 when u_blgl0,
+  x_dad & y_c16 & a_sll & r_dad & m_nop & e_nop & s_jmp & u_blgl2 when u_blgl1,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_bjl0  when u_blgl2,
+
+  x_ir  & y_c4  & a_srl & r_dad & m_nop & e_iia & s_jmp & u_sll1  when u_sll0 ,
+  x_dad & y_c2  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_sll2  when u_sll1 ,
+  x_rt  & y_dad & a_sll & r_rd  & m_rdi & e_ibe & s_exc & u_init  when u_sll2 ,
+
+  x_ir  & y_c4  & a_srl & r_dad & m_nop & e_iia & s_jmp & u_srl1  when u_srl0 ,
+  x_dad & y_c2  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_srl2  when u_srl1 ,
+  x_rt  & y_dad & a_srl & r_rd  & m_rdi & e_ibe & s_exc & u_init  when u_srl2 ,
+
+  x_ir  & y_c4  & a_srl & r_dad & m_nop & e_iia & s_jmp & u_sra1  when u_sra0 ,
+  x_dad & y_c2  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_sra2  when u_sra1 ,
+  x_rt  & y_dad & a_sra & r_rd  & m_rdi & e_ibe & s_exc & u_init  when u_sra2 ,
+
+  x_rs  & y_c0  & a_add & r_dad & m_nop & e_iia & s_jmp & u_sll2  when u_sllv0,
+
+  x_rs  & y_c0  & a_add & r_dad & m_nop & e_iia & s_jmp & u_srl2  when u_srlv0,
+
+  x_rs  & y_c0  & a_add & r_dad & m_nop & e_iia & s_jmp & u_sra2  when u_srav0,
+
+  x_rs  & y_c0  & a_add & r_pc  & m_nop & e_nop & s_jmp & u_bj1   when u_jr0  ,
+
+  x_rs  & y_c0  & a_add & r_pc  & m_nop & e_nop & s_jmp & u_jlr1  when u_jlr0 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_jmp & u_jlr2  when u_jlr1 ,
+  x_cpc & y_c4  & a_add & r_rd  & m_rdi & e_ibe & s_exc & u_init  when u_jlr2 ,
+
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_sys & s_jmp & u_sybk0 when u_sysc0,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_exc & u_init  when u_sybk0,
+
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_brk & s_jmp & u_sybk0 when u_brk0 ,
+
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_ovr & s_jmp & u_arit0 when u_add0 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_jmp & u_wrtrd when u_arit0,
+  x_c0  & y_dad & a_add & r_rd  & m_rdi & e_ibe & s_exc & u_init  when u_wrtrd,
+
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_addu0,
+
+  x_rs  & y_dad & a_sub & r_dad & m_nop & e_ovr & s_jmp & u_arit0 when u_sub0 ,
+
+  x_rs  & y_dad & a_sub & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_subu0,
+
+  x_rs  & y_dad & a_and & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_and0 ,
+
+  x_rs  & y_dad & a_or  & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_or0  ,
+
+  x_rs  & y_dad & a_xor & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_xor0 ,
+
+  x_rs  & y_dad & a_nor & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_nor0 ,
+
+  x_rs  & y_dad & a_lt  & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_slt0 ,
+
+  x_rs  & y_dad & a_ltu & r_dad & m_nop & e_iia & s_jmp & u_wrtrd when u_sltu0,
+
+  x_c4  & y_c24 & a_add & r_dad & m_nop & e_nop & s_jmp & u_j1    when u_j0   ,
+  x_pc  & y_dad & a_srl & r_pc  & m_nop & e_nop & s_jmp & u_j2    when u_j1   ,
+  x_pc  & y_dad & a_sll & r_pc  & m_nop & e_nop & s_jmp & u_j3    when u_j2   ,
+  x_c4  & y_c2  & a_add & r_dad & m_nop & e_nop & s_jmp & u_j4    when u_j3   ,
+  x_ir  & y_dad & a_sll & r_dad & m_nop & e_nop & s_jmp & u_j5    when u_j4   ,
+  x_dad & y_c4  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_bj0   when u_j5   ,
+
+  x_c4  & y_c24 & a_add & r_dad & m_nop & e_nop & s_jmp & u_jal1  when u_jal0 ,
+  x_pc  & y_dad & a_srl & r_pc  & m_nop & e_nop & s_jmp & u_jal2  when u_jal1 ,
+  x_pc  & y_dad & a_sll & r_pc  & m_nop & e_nop & s_jmp & u_jal3  when u_jal2 ,
+  x_c4  & y_c2  & a_add & r_dad & m_nop & e_nop & s_jmp & u_jal4  when u_jal3 ,
+  x_ir  & y_dad & a_sll & r_dad & m_nop & e_nop & s_jmp & u_jal5  when u_jal4 ,
+  x_dad & y_c4  & a_srl & r_dad & m_nop & e_nop & s_jmp & u_bjl0  when u_jal5 ,
+
+  x_pc  & y_dad & a_add & r_pc  & m_nop & e_nop & s_jmp & u_bjl1  when u_bjl0 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_jmp & u_bjl2  when u_bjl1 ,
+  x_cpc & y_c4  & a_add & r_r31 & m_rdi & e_ibe & s_exc & u_init  when u_bjl2 ,
+
+  x_rt  & y_c0  & a_add & r_dad & m_nop & e_nop & s_jmp & u_beq1  when u_beq0 ,
+  x_rs  & y_dad & a_eq  & r_dad & m_nop & e_nop & s_jmp & u_bch0  when u_beq1 ,
+
+  x_c0  & y_dad & a_sub & r_dad & m_nop & e_nop & s_jmp & u_bch1  when u_bch0 ,
+  x_ir  & y_dad & a_and & r_dad & m_nop & e_nop & s_jmp & u_bch2  when u_bch1 ,
+  x_dad & y_c16 & a_sll & r_dad & m_nop & e_nop & s_jmp & u_bch3  when u_bch2 ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_bch4  when u_bch3 ,
+  x_dad & y_c2  & a_sll & r_dad & m_nop & e_nop & s_jmp & u_bj0   when u_bch4 ,
+
+  x_rt  & y_c0  & a_add & r_dad & m_nop & e_nop & s_jmp & u_bne1  when u_bne0 ,
+  x_rs  & y_dad & a_ne  & r_dad & m_nop & e_nop & s_jmp & u_bch0  when u_bne1 ,
+
+  x_pc  & y_dad & a_add & r_pc  & m_nop & e_nop & s_jmp & u_bj1   when u_bj0  ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_jmp & u_bj2   when u_bj1  ,
+  x_c0  & y_c0  & a_add & r_nop & m_rdi & e_ibe & s_exc & u_init  when u_bj2  ,
+
+  x_rs  & y_c0  & a_add & r_dad & m_nop & e_nop & s_jmp & u_ble1  when u_ble0 ,
+  x_c0  & y_dad & a_lt  & r_dad & m_nop & e_nop & s_jmp & u_ble2  when u_ble1 ,
+  x_dad & y_c1  & a_xor & r_dad & m_nop & e_nop & s_jmp & u_bch0  when u_ble2 ,
+
+  x_rs  & y_c0  & a_add & r_dad & m_nop & e_nop & s_jmp & u_bgt1  when u_bgt0 ,
+  x_c0  & y_dad & a_lt  & r_dad & m_nop & e_nop & s_jmp & u_bch0  when u_bgt1 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_adi1  when u_adi0 ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_adi2  when u_adi1 ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_ovr & s_jmp & u_adi3  when u_adi2 ,
+  x_c0  & y_dad & a_add & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_adi3 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_adiu1 when u_adiu0,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_adiu2 when u_adiu1,
+  x_rs  & y_dad & a_add & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_adiu2,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_sti1  when u_sti0 ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_sti2  when u_sti1 ,
+  x_rs  & y_dad & a_lt  & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_sti2 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_stiu1 when u_stiu0,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_stiu2 when u_stiu1,
+  x_rs  & y_dad & a_ltu & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_stiu2,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_andi1 when u_andi0,
+  x_dad & y_c16 & a_srl & r_dad & m_nop & e_nop & s_jmp & u_andi2 when u_andi1,
+  x_rs  & y_dad & a_and & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_andi2,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_ori1  when u_ori0 ,
+  x_dad & y_c16 & a_srl & r_dad & m_nop & e_nop & s_jmp & u_ori2  when u_ori1 ,
+  x_rs  & y_dad & a_or  & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_ori2 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_xori1 when u_xori0,
+  x_dad & y_c16 & a_srl & r_dad & m_nop & e_nop & s_jmp & u_xori2 when u_xori1,
+  x_rs  & y_dad & a_xor & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_xori2,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lui1  when u_lui0 ,
+  x_c0  & y_dad & a_add & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lui1 ,
+
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_cop & s_s4  & u_cp01  when u_cp00 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_s10 & u_mc01  when u_mc00 ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_s32 & u_mc02  when u_mc01 ,
+  x_rt  & y_c0  & a_add & r_cp0 & m_rdi & e_ibe & s_exc & u_init  when u_mtc00,
+  x_c0  & y_cp0 & a_add & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_mfc00,
+
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_f10 & u_cpc01 when u_cpc00,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_nop & s_f32 & u_cpc02 when u_cpc01,
+  x_c4  & y_sr  & a_and & r_dad & m_nop & e_nop & s_f54 & u_cpc04 when u_cpc03,
+  x_dad & y_sr  & a_xor & r_dad & m_nop & e_nop & s_nez & u_eret1 when u_eret0,
+  x_c0  & y_c2  & a_nor & r_dad & m_nop & e_nop & s_jmp & u_eret2 when u_eret1,
+  x_dad & y_sr  & a_and & r_dad & m_nop & e_nop & s_jmp & u_eret3 when u_eret2,
+  x_c0  & y_epc & a_add & r_pc  & m_nop & e_nop & s_jmp & u_eret4 when u_eret3,
+  x_c0  & y_eep & a_add & r_pc  & m_nop & e_nop & s_jmp & u_eret4 when u_eret6,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_iia & s_jmp & u_eret5 when u_eret4,
+  x_dad & y_c0  & a_add & r_sr  & m_rdi & e_ibe & s_exc & u_init  when u_eret5,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lb1   when u_lb0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_lb2   when u_lb1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_lb3   when u_lb2  ,
+  x_dad & y_c0  & a_nor & r_dot & m_nop & e_ilb & s_jmp & u_lb4   when u_lb3  ,
+  x_dot & y_c2  & a_sll & r_dot & m_rdw & e_dbe & s_jmp & u_lb5   when u_lb4  ,
+  x_dot & y_c1  & a_sll & r_dot & m_nop & e_nop & s_jmp & u_lb6   when u_lb5  ,
+  x_din & y_dot & a_sll & r_dad & m_nop & e_nop & s_jmp & u_lb7   when u_lb6  ,
+  x_dad & y_c24 & a_sra & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lb7  ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lh1   when u_lh0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_lh2   when u_lh1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_lh3   when u_lh2  ,
+  x_dad & y_c2  & a_xor & r_dot & m_nop & e_ilh & s_jmp & u_lh4   when u_lh3  ,
+  x_dot & y_c2  & a_sll & r_dot & m_rdw & e_dbe & s_jmp & u_lh5   when u_lh4  ,
+  x_dot & y_c1  & a_sll & r_dot & m_nop & e_nop & s_jmp & u_lh6   when u_lh5  ,
+  x_din & y_dot & a_sll & r_dad & m_nop & e_nop & s_jmp & u_lh7   when u_lh6  ,
+  x_dad & y_c16 & a_sra & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lh7  ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lw1   when u_lw0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_lw2   when u_lw1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_lw3   when u_lw2  ,
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_ilw & s_jmp & u_lw4   when u_lw3  ,
+  x_c0  & y_c0  & a_add & r_nop & m_rdw & e_dbe & s_jmp & u_lw5   when u_lw4  ,
+  x_din & y_c0  & a_add & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lw5  ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lbu1  when u_lbu0 ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_lbu2  when u_lbu1 ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_lbu3  when u_lbu2 ,
+  x_dad & y_c0  & a_nor & r_dot & m_nop & e_ilb & s_jmp & u_lbu4  when u_lbu3 ,
+  x_dot & y_c2  & a_sll & r_dot & m_rdw & e_dbe & s_jmp & u_lbu5  when u_lbu4 ,
+  x_dot & y_c1  & a_sll & r_dot & m_nop & e_nop & s_jmp & u_lbu6  when u_lbu5 ,
+  x_din & y_dot & a_sll & r_dad & m_nop & e_nop & s_jmp & u_lbu7  when u_lbu6 ,
+  x_dad & y_c24 & a_srl & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lbu7 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_lhu1  when u_lhu0 ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_lhu2  when u_lhu1 ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_lhu3  when u_lhu2 ,
+  x_dad & y_c2  & a_xor & r_dot & m_nop & e_ilh & s_jmp & u_lhu4  when u_lhu3 ,
+  x_dot & y_c2  & a_sll & r_dot & m_rdw & e_dbe & s_jmp & u_lhu5  when u_lhu4 ,
+  x_dot & y_c1  & a_sll & r_dot & m_nop & e_nop & s_jmp & u_lhu6  when u_lhu5 ,
+  x_din & y_dot & a_sll & r_dad & m_nop & e_nop & s_jmp & u_lhu7  when u_lhu6 ,
+  x_dad & y_c16 & a_srl & r_rt  & m_rdi & e_ibe & s_exc & u_init  when u_lhu7 ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_sb1   when u_sb0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_sb2   when u_sb1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_sb3   when u_sb2  ,
+  x_rt  & y_c0  & a_add & r_dot & m_nop & e_isb & s_jmp & u_sb4   when u_sb3  ,
+  x_c0  & y_c0  & a_add & r_nop & m_wtb & e_dbe & s_jmp & u_stor0 when u_sb4  ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_sh1   when u_sh0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_sh2   when u_sh1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_sh3   when u_sh2  ,
+  x_rt  & y_c0  & a_add & r_dot & m_nop & e_ish & s_jmp & u_sh4   when u_sh3  ,
+  x_c0  & y_c0  & a_add & r_nop & m_wth & e_dbe & s_jmp & u_stor0 when u_sh4  ,
+
+  x_ir  & y_c16 & a_sll & r_dad & m_nop & e_iia & s_jmp & u_sw1   when u_sw0  ,
+  x_dad & y_c16 & a_sra & r_dad & m_nop & e_nop & s_jmp & u_sw2   when u_sw1  ,
+  x_rs  & y_dad & a_add & r_dad & m_nop & e_nop & s_jmp & u_sw3   when u_sw2  ,
+  x_rt  & y_c0  & a_add & r_dot & m_nop & e_isw & s_jmp & u_sw4   when u_sw3  ,
+  x_c0  & y_c0  & a_add & r_nop & m_wtw & e_dbe & s_jmp & u_stor0 when u_sw4  ,
+  x_c0  & y_c0  & a_add & r_nop & m_rdi & e_ibe & s_exc & u_init  when u_stor0,
+
+  x_c0  & y_c0  & a_add & r_nop & m_nop & e_unk & s_exc & u_init  when others ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's fields				#
+	-- ### ------------------------------------------------------ ###
+
+U_XOP_SX   <= UINS_RX (41 downto 38);
+U_YOP_SX   <= UINS_RX (37 downto 34);
+U_ALU_SX   <= UINS_RX (33 downto 30);
+
+U_RES_SX   <= UINS_RX (29 downto 25);
+U_MEM_SX   <= UINS_RX (24 downto 21);
+U_EXC_SX   <= UINS_RX (20 downto 17);
+
+U_SEQ_SX   <= UINS_RX (16 downto 12);
+U_MAD_SX   <= UINS_RX (11 downto  0);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's decoded field			#
+	-- #     - operating unit					#
+	-- ### ------------------------------------------------------ ###
+
+A_SUB_SX   <= '1'      when (U_ALU_SX = a_sub) else
+              '1'      when (U_ALU_SX = a_lt ) else
+              '1'      when (U_ALU_SX = a_ltu) else
+              '0'      ;
+
+A_SRA_SX   <= '1'      when (U_ALU_SX = a_sra) else '0';
+A_SLL_SX   <= '1'      when (U_ALU_SX = a_sll) else '0';
+
+A_AND_SX   <= '1'      when (U_ALU_SX = a_and) else '0';
+A_NOR_SX   <= '1'      when (U_ALU_SX = a_nor) else '0';
+A_XOR_SX   <= '1'      when (U_ALU_SX = a_xor) else
+              '1'      when (U_ALU_SX = a_eq ) else
+              '1'      when (U_ALU_SX = a_ne ) else
+              '0'      ;
+
+A_ARI_SX   <= '1'      when (U_ALU_SX = a_add) else
+              '1'      when (U_ALU_SX = a_sub) else
+              '0'      ;
+
+A_SHF_SX   <= '1'      when (U_ALU_SX = a_sll) else
+              '1'      when (U_ALU_SX = a_srl) else
+              '1'      when (U_ALU_SX = a_sra) else
+              '0'      ;
+
+A_LOG_SX   <= '1'      when (U_ALU_SX = a_and) else
+              '1'      when (U_ALU_SX = a_or ) else
+              '1'      when (U_ALU_SX = a_xor) else
+              '1'      when (U_ALU_SX = a_nor) else
+              '0'      ;
+
+A_EQ_SX    <= '1'      when (U_ALU_SX = a_eq ) else '0';
+A_NE_SX    <= '1'      when (U_ALU_SX = a_ne ) else '0';
+A_LT_SX    <= '1'      when (U_ALU_SX = a_lt ) else '0';
+A_LTU_SX   <= '1'      when (U_ALU_SX = a_ltu) else '0';
+
+A_TST_SX   <= '1'      when (U_ALU_SX = a_eq ) else
+              '1'      when (U_ALU_SX = a_ne ) else
+              '1'      when (U_ALU_SX = a_lt ) else
+              '1'      when (U_ALU_SX = a_ltu) else
+              '0'      ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-address						#
+	-- #								#
+	-- #   - reset                                   000 000000 000	#
+	-- #   - check exception                         ... ...... ..x	#
+	-- #   - check operation code                    ... xxxxxx ...	#
+	-- #   - check funcion                           ... xxxxxx ...	#
+	-- #   - check     equal                         ... ...... ..x	#
+	-- #   - check not equal                         ... ...... ..x	#
+	-- #   - check     less  than                    ... ...... ..x	#
+	-- #   - check not less  than                    ... ...... ..x	#
+	-- #   - check function 01                       ... ...... .xx	#
+	-- #   - check function 23                       ... ...... .xx	#
+	-- #   - check function 45                       ... ...... .xx	#
+	-- #   - check rs       01                       ... ...... .xx	#
+	-- #   - check rs       23                       ... ...... .xx	#
+	-- #   - check rs        4                       ... ...... ..x	#
+	-- #   - check rt       01                       ... ...... .xx	#
+	-- #   - check rt       23                       ... ...... .xx	#
+	-- #   - check rt        4                       ... ...... ..x	#
+	-- ### ------------------------------------------------------ ###
+
+UAOPC_SX   <= U_MAD_SX (11 downto 9) &     OPC_SX & U_MAD_SX  (2 downto 0);
+UAFUN_SX   <= U_MAD_SX (11 downto 9) &     FUN_SX & U_MAD_SX  (2 downto 0);
+
+UAEQZ_SX   <= U_MAD_SX (11 downto 1) &     EQZ_RX                         ;
+UANEZ_SX   <= U_MAD_SX (11 downto 1) & not EQZ_RX                         ;
+UALT_SX    <= U_MAD_SX (11 downto 1) &     LT_RX                          ;
+UAGE_SX    <= U_MAD_SX (11 downto 1) & not LT_RX                          ;
+
+UAF10_SX   <= U_MAD_SX (11 downto 2)              & FUN_SX    (1 downto 0);
+UAF32_SX   <= U_MAD_SX (11 downto 2)              & FUN_SX    (3 downto 2);
+UAF54_SX   <= U_MAD_SX (11 downto 2)              & FUN_SX    (5 downto 4);
+
+UAS10_SX   <= U_MAD_SX (11 downto 2)              & RS_SX     (1 downto 0);
+UAS32_SX   <= U_MAD_SX (11 downto 2)              & RS_SX     (3 downto 2);
+UAS4_SX    <= U_MAD_SX (11 downto 1)              & RS_SX     (         4);
+
+UAT10_SX   <= U_MAD_SX (11 downto 2)              & RT_SX     (1 downto 0);
+UAT32_SX   <= U_MAD_SX (11 downto 2)              & RT_SX     (3 downto 2);
+UAT4_SX    <= U_MAD_SX (11 downto 1)              & RT_SX     (         4);
+
+UAEXC_SX   <= U_MAD_SX (11 downto 1)              & EXCRQ_RX              ;
+
+UADR_SX    <= u_reset   when (RESET_RX = '1'  ) else
+
+              UAOPC_SX  when (U_SEQ_SX = s_opc) else
+              UAFUN_SX  when (U_SEQ_SX = s_fun) else
+
+              UAEQZ_SX  when (U_SEQ_SX = s_eqz) else
+              UANEZ_SX  when (U_SEQ_SX = s_nez) else
+              UALT_SX   when (U_SEQ_SX = s_lt ) else
+              UAGE_SX   when (U_SEQ_SX = s_ge ) else
+
+              UAF10_SX  when (U_SEQ_SX = s_f10) else
+              UAF32_SX  when (U_SEQ_SX = s_f32) else
+              UAF54_SX  when (U_SEQ_SX = s_f54) else
+
+              UAS10_SX  when (U_SEQ_SX = s_s10) else
+              UAS32_SX  when (U_SEQ_SX = s_s32) else
+              UAS4_SX   when (U_SEQ_SX = s_s4 ) else
+
+              UAT10_SX  when (U_SEQ_SX = s_t10) else
+              UAT32_SX  when (U_SEQ_SX = s_t32) else
+              UAT4_SX   when (U_SEQ_SX = s_t4 ) else
+
+              UAEXC_SX  when (U_SEQ_SX = s_exc) else
+              U_MAD_SX  ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   general write enables					#
+	-- ### ------------------------------------------------------ ###
+
+FWWE_SX    <= D_ACCPT or RESET_RX when (M_ACS_SX = '1') else '1';
+
+FWXWE_SX   <= FWWE_SX and not (EXCRQ_RX              );
+FWAXWE_SX  <= FWWE_SX and not (EXCRQ_RX or LATEEXC_XX);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's write enable				#
+	-- ### ------------------------------------------------------ ###
+
+UIWE_SX    <= FWWE_SX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   exception bits' write enable				#
+	-- ### ------------------------------------------------------ ###
+
+EXCWE_XX   <= FWWE_SX                   when (U_EXC_SX = e_clr) else
+              FWWE_SX and not  EXCRQ_RX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's decoded field			#
+	-- #     - write enables : operating unit's result		#
+	-- ### ------------------------------------------------------ ###
+
+R_RT_SX    <= FWAXWE_SX when (U_RES_SX = r_rt                      ) else '0';
+R_RD_SX    <= FWAXWE_SX when (U_RES_SX = r_rd                      ) else '0';
+R_R31_SX   <= FWAXWE_SX when (U_RES_SX = r_r31                     ) else '0';
+
+R_LO_SX    <= FWAXWE_SX when (U_RES_SX = r_lo                      ) else '0';
+R_HI_SX    <= FWAXWE_SX when (U_RES_SX = r_hi                      ) else '0';
+
+R_CR_SX    <= FWAXWE_SX when (U_RES_SX = r_cr                      ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WCAUSE_SX  = '1') else
+              '0'       ;
+R_XCR_SX   <= FWWE_SX  when (U_RES_SX = r_xcr                     ) else '0';
+
+R_SR_SX    <= FWAXWE_SX when (U_RES_SX = r_sr                      ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WSTATUS_SX = '1') else
+              '0'       ;
+
+R_EPC_SX   <= FWAXWE_SX when (U_RES_SX = r_epc                     ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WEPC_SX    = '1') else
+              '0'       ;
+
+R_EEP_SX   <= FWAXWE_SX when (U_RES_SX = r_eep                     ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WEEPC_SX   = '1') else
+              '0'       ;
+
+R_EBS_SX   <= FWAXWE_SX when (U_RES_SX = r_ebs                     ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WEBASE_SX  = '1') else
+              '0'       ;
+
+R_BVA_SX   <= FWAXWE_SX when (U_RES_SX = r_bva                     ) else
+              FWAXWE_SX when (U_RES_SX = r_cp0 and WBADVA_SX  = '1') else
+              '0'       ;
+
+R_DAD_SX   <= FWAXWE_SX when (U_RES_SX = r_dad) else '0' ;
+R_DOT_SX   <= FWAXWE_SX when (U_RES_SX = r_dot) else '0' ;
+R_NPC_SX   <= FWAXWE_SX when (U_RES_SX = r_pc ) else '0' ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   integer destination register's write enables		#
+	-- ### ------------------------------------------------------ ###
+
+IDRNBR_SX  <= I_RX (20 downto 16) when (R_RT_SX  = '1') else
+              I_RX (15 downto 11) when (R_RD_SX  = '1') else
+              "11111"             when (R_R31_SX = '1') else
+              "00000"             ;
+
+with IDRNBR_SX select
+R_IDR_SX   <= X"0000_0001" when B"00000",
+              X"0000_0002" when B"00001",
+              X"0000_0004" when B"00010",
+              X"0000_0008" when B"00011",
+              X"0000_0010" when B"00100",
+              X"0000_0020" when B"00101",
+              X"0000_0040" when B"00110",
+              X"0000_0080" when B"00111",
+              X"0000_0100" when B"01000",
+              X"0000_0200" when B"01001",
+              X"0000_0400" when B"01010",
+              X"0000_0800" when B"01011",
+              X"0000_1000" when B"01100",
+              X"0000_2000" when B"01101",
+              X"0000_4000" when B"01110",
+              X"0000_8000" when B"01111",
+              X"0001_0000" when B"10000",
+              X"0002_0000" when B"10001",
+              X"0004_0000" when B"10010",
+              X"0008_0000" when B"10011",
+              X"0010_0000" when B"10100",
+              X"0020_0000" when B"10101",
+              X"0040_0000" when B"10110",
+              X"0080_0000" when B"10111",
+              X"0100_0000" when B"11000",
+              X"0200_0000" when B"11001",
+              X"0400_0000" when B"11010",
+              X"0800_0000" when B"11011",
+              X"1000_0000" when B"11100",
+              X"2000_0000" when B"11101",
+              X"4000_0000" when B"11110",
+              X"8000_0000" when B"11111",
+              X"0000_0000" when others  ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   coprocessor zero destination registers' write enable	#
+	-- ### ------------------------------------------------------ ###
+
+C0DRNBR_SX <= I_RX (15 downto 11) & I_RX ( 2 downto  0) ;
+
+WCAUSE_SX  <= '1' when (C0DRNBR_SX = c0_cause   ) else '0';
+WBADVA_SX  <= '1' when (C0DRNBR_SX = c0_badvaddr) else '0';
+WSTATUS_SX <= '1' when (C0DRNBR_SX = c0_status  ) else '0';
+WEPC_SX    <= '1' when (C0DRNBR_SX = c0_epc     ) else '0';
+WEEPC_SX   <= '1' when (C0DRNBR_SX = c0_eepc    ) else '0';
+WEBASE_SX  <= '1' when (C0DRNBR_SX = c0_ebase   ) else '0';
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's decoded field			#
+	-- #     - memory access					#
+	-- ### ------------------------------------------------------ ###
+
+M_ACS_SX   <= '0'      when (U_MEM_SX = m_nop) else not EXCRQ_RX;
+
+M_WRD_SX   <= '1'      when (U_MEM_SX = m_rdi) else
+              '1'      when (U_MEM_SX = m_rdw) else
+              '1'      when (U_MEM_SX = m_wtw) else
+              '1'      when (U_MEM_SX = m_rlw) else
+              '1'      when (U_MEM_SX = m_wlw) else
+              '1'      when (U_MEM_SX = m_rxr) else
+              '1'      when (U_MEM_SX = m_wxr) else
+              '0'      ;
+
+M_HLF_SX   <= '1'      when (U_MEM_SX = m_wth) else '0'         ;
+M_BYT_SX   <= '1'      when (U_MEM_SX = m_wtb) else '0'         ;
+
+M_RED_SX   <= '1'      when (U_MEM_SX = m_rdi) else
+              '1'      when (U_MEM_SX = m_rdw) else
+              '1'      when (U_MEM_SX = m_rlw) else
+              '1'      when (U_MEM_SX = m_wlw) else
+              '0'      ;
+
+M_WRT_SX   <= '1'      when (U_MEM_SX = m_wtw) else
+              '1'      when (U_MEM_SX = m_wth) else
+              '1'      when (U_MEM_SX = m_wtb) else
+              '1'      when (U_MEM_SX = m_wlw) else
+              '0'      ;
+
+M_INS_SX   <= '1'      when (U_MEM_SX = m_rdi) else '0'         ;
+
+M_DAT_SX   <= '1'      when (U_MEM_SX = m_rdw) else
+              '1'      when (U_MEM_SX = m_wtw) else
+              '1'      when (U_MEM_SX = m_rlw) else
+              '1'      when (U_MEM_SX = m_wlw) else
+              '1'      when (U_MEM_SX = m_wth) else
+              '1'      when (U_MEM_SX = m_wtb) else
+              '0'      ;
+
+M_XRG_SX   <= '1'      when (U_MEM_SX = m_rxr) else
+              '1'      when (U_MEM_SX = m_wxr) else
+              '0'      ;
+
+M_LKD_SX   <= '1'      when (U_MEM_SX = m_rlw) else
+              '1'      when (U_MEM_SX = m_wlw) else
+              '0'      ;
+
+M_RLK_SX   <= '1'      when (U_MEM_SX = m_lkr) else '0'         ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   write enables of registers receiving data from the	#
+	-- #   memory							#
+	-- ### ------------------------------------------------------ ###
+
+M_IR_SX    <= FWAXWE_SX when (U_MEM_SX = m_rdi) else '0' ;
+M_DIN_SX   <= FWAXWE_SX when (U_MEM_SX = m_rdw) else '0' ;
+M_PC_SX    <= FWAXWE_SX when (U_MEM_SX = m_rdi) else '0' ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   write enable of saved memory address register		#
+	-- ### ------------------------------------------------------ ###
+
+E_AD_SX    <= FWAXWE_SX when (U_EXC_SX = e_iia) else
+              FWAXWE_SX when (U_EXC_SX = e_ilw) else
+              FWAXWE_SX when (U_EXC_SX = e_ilh) else
+              FWAXWE_SX when (U_EXC_SX = e_ilb) else
+              FWAXWE_SX when (U_EXC_SX = e_isw) else
+              FWAXWE_SX when (U_EXC_SX = e_ish) else
+              FWAXWE_SX when (U_EXC_SX = e_isb) else
+              '0'       ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   saved memory address register				#
+	-- ### ------------------------------------------------------ ###
+
+AD_SX      <= NEXTPC_RX when (U_EXC_SX = e_iia) else DAD_RX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   access mode						#
+	-- ### ------------------------------------------------------ ###
+
+MODE_SX    <= "00"                   when (STATUS_RX (1) = '1') else
+              "00"                   when (STATUS_RX (2) = '1') else
+              STATUS_RX (4 downto 3) ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   user mode						#
+	-- #       - Kernel, Supervisor, User bits = 10			#
+	-- #   and - Exception Level          bit  =  0			#
+	-- #   and - Error     Level          bit  =  0			#
+	-- ### ------------------------------------------------------ ###
+
+USRMOD_SX  <=     STATUS_RX (4) and not STATUS_RX (3) and
+              not STATUS_RX (2) and not STATUS_RX (1)    ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   byte select						#
+	-- ### ------------------------------------------------------ ###
+
+BYTSEL_SX  <=
+  B"0001" when (M_BYT_SX = '1' and DAD_RX (1 downto 0) = "00") else
+  B"0010" when (M_BYT_SX = '1' and DAD_RX (1 downto 0) = "01") else
+  B"0100" when (M_BYT_SX = '1' and DAD_RX (1 downto 0) = "10") else
+  B"1000" when (M_BYT_SX = '1' and DAD_RX (1 downto 0) = "11") else
+  B"0011" when (M_HLF_SX = '1' and DAD_RX (1         ) = '0' ) else
+  B"1100" when (M_HLF_SX = '1' and DAD_RX (1         ) = '1' ) else
+  B"1111" ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   data out							#
+	-- ### ------------------------------------------------------ ###
+
+DBYT_SX    <= DOUT_RX ( 7 downto 0);
+DHLF_SX    <= DOUT_RX (15 downto 0);
+DWRD_SX    <= DOUT_RX (31 downto 0);
+
+DOUT_SX    <=
+  DBYT_SX & DBYT_SX & DBYT_SX & DBYT_SX when (M_BYT_SX = '1') else
+  DHLF_SX & DHLF_SX                     when (M_HLF_SX = '1') else
+  DWRD_SX                               ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   address							#
+	-- ### ------------------------------------------------------ ###
+
+DA_SX      <= NEXTPC_RX when (U_MEM_SX = m_rdi) else DAD_RX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's decoded field			#
+	-- #     - exception						#
+	-- ### ------------------------------------------------------ ###
+
+	-- ### ------------------------------------------------------ ###
+	-- #   micro-instruction's decoded field			#
+	-- #     - micro-sequencer					#
+	-- ### ------------------------------------------------------ ###
+
+	-- ### ------------------------------------------------------ ###
+	-- #   read integer source register from the register file	#
+	-- ### ------------------------------------------------------ ###
+
+ISRNBR_SX  <= I_RX (25 downto 21) when (U_XOP_SX = x_rs) else
+              I_RX (20 downto 16) ;
+
+with ISRNBR_SX select
+X_ISR_SX   <= R0_RX        when B"00000",
+              R1_RX        when B"00001",
+              R2_RX        when B"00010",
+              R3_RX        when B"00011",
+              R4_RX        when B"00100",
+              R5_RX        when B"00101",
+              R6_RX        when B"00110",
+              R7_RX        when B"00111",
+              R8_RX        when B"01000",
+              R9_RX        when B"01001",
+              R10_RX       when B"01010",
+              R11_RX       when B"01011",
+              R12_RX       when B"01100",
+              R13_RX       when B"01101",
+              R14_RX       when B"01110",
+              R15_RX       when B"01111",
+              R16_RX       when B"10000",
+              R17_RX       when B"10001",
+              R18_RX       when B"10010",
+              R19_RX       when B"10011",
+              R20_RX       when B"10100",
+              R21_RX       when B"10101",
+              R22_RX       when B"10110",
+              R23_RX       when B"10111",
+              R24_RX       when B"11000",
+              R25_RX       when B"11001",
+              R26_RX       when B"11010",
+              R27_RX       when B"11011",
+              R28_RX       when B"11100",
+              R29_RX       when B"11101",
+              R30_RX       when B"11110",
+              R31_RX       when B"11111",
+              X"0000_0000" when others  ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   x operand						#
+	-- ### ------------------------------------------------------ ###
+
+XOPER_SX   <= X_ISR_SX    when (U_XOP_SX = x_rs ) else
+              X_ISR_SX    when (U_XOP_SX = x_rt ) else
+              LO_RX       when (U_XOP_SX = x_lo ) else
+              HI_RX       when (U_XOP_SX = x_hi ) else
+              DAD_RX      when (U_XOP_SX = x_dad) else
+              DOUT_RX     when (U_XOP_SX = x_dot) else
+              NEXTPC_RX   when (U_XOP_SX = x_pc ) else
+              PC_RX       when (U_XOP_SX = x_cpc) else
+              AD_RX       when (U_XOP_SX = x_ad ) else
+              I_RX        when (U_XOP_SX = x_ir ) else
+              DIN_RX      when (U_XOP_SX = x_din) else
+              cst_16      when (U_XOP_SX = x_c16) else
+              cst_4       when (U_XOP_SX = x_c4 ) else
+              cst_2       when (U_XOP_SX = x_c2 ) else
+              cst_1       when (U_XOP_SX = x_c1 ) else
+              cst_0       ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   read coprocessor zero's source register			#
+	-- ### ------------------------------------------------------ ###
+
+C0SRNBR_SX <= I_RX (15 downto 11) & I_RX ( 2 downto  0) ;
+
+with C0SRNBR_SX select
+Y_C0SR_SX  <= BADVA_RX     when c0_badvaddr ,
+              STATUS_RX    when c0_status   ,
+              CAUSE_RX     when c0_cause    ,
+              EPC_RX       when c0_epc      ,
+              EBASE_RX     when c0_ebase    ,
+              EEPC_RX      when c0_eepc     ,
+              X"0000_0000" when others      ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   y operand						#
+	-- ### ------------------------------------------------------ ###
+
+YOPER_SX   <= STATUS_RX   when (U_YOP_SX = y_sr ) else
+              CAUSE_RX    when (U_YOP_SX = y_cr ) else
+              EBASE_RX    when (U_YOP_SX = y_ebs) else
+              BADVA_RX    when (U_YOP_SX = y_bar) else
+              EPC_RX      when (U_YOP_SX = y_epc) else
+              EEPC_RX     when (U_YOP_SX = y_eep) else
+              DAD_RX      when (U_YOP_SX = y_dad) else
+              DOUT_RX     when (U_YOP_SX = y_dot) else
+              Y_C0SR_SX   when (U_YOP_SX = y_cp0) else
+              cst_24      when (U_YOP_SX = y_c24) else
+              cst_16      when (U_YOP_SX = y_c16) else
+              cst_8       when (U_YOP_SX = y_c8 ) else
+              cst_4       when (U_YOP_SX = y_c4 ) else
+              cst_2       when (U_YOP_SX = y_c2 ) else
+              cst_1       when (U_YOP_SX = y_c1 ) else
+              cst_0       ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   operands for arithmetic operations			#
+	-- ### ------------------------------------------------------ ###
+
+XARITH_SX  <=     XOPER_SX ;
+YARITH_SX  <= not YOPER_SX when (A_SUB_SX = '1') else YOPER_SX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   arithmetic result					#
+	-- ### ------------------------------------------------------ ###
+
+ARICIN_SX  <=  ARICRY_SX (30 downto 0)  & '1' when (A_SUB_SX = '1') else
+               ARICRY_SX (30 downto 0)  & '0' ;
+
+RARITH_SX  <=  XARITH_SX xor YARITH_SX  xor ARICIN_SX ;
+
+ARICRY_SX  <= (XARITH_SX and YARITH_SX) or
+              (XARITH_SX and ARICIN_SX) or
+              (YARITH_SX and ARICIN_SX)               ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   operands for shift operations				#
+	-- ### ------------------------------------------------------ ###
+
+XSHIFT_SX  <= XOPER_SX             ;
+YSHIFT_SX  <= YOPER_SX (4 downto 0);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   shifter's result						#
+	-- ### ------------------------------------------------------ ###
+
+XEXT_SX    <= X"ffffffff" when (XSHIFT_SX (31) = '1') else X"00000000" ;
+SHIFTIN_SX <= XEXT_SX     when (A_SRA_SX       = '1') else X"00000000" ;
+
+with YSHIFT_SX select
+SHLEFT_SX  <=
+  XSHIFT_SX  (31 downto  0)                               when B"00000",
+  XSHIFT_SX  (30 downto  0)               & "0"           when B"00001",
+  XSHIFT_SX  (29 downto  0)               & "00"          when B"00010",
+  XSHIFT_SX  (28 downto  0)               & "000"         when B"00011",
+  XSHIFT_SX  (27 downto  0) & X"0"                        when B"00100",
+  XSHIFT_SX  (26 downto  0) & X"0"        & "0"           when B"00101",
+  XSHIFT_SX  (25 downto  0) & X"0"        & "00"          when B"00110",
+  XSHIFT_SX  (24 downto  0) & X"0"        & "000"         when B"00111",
+  XSHIFT_SX  (23 downto  0) & X"00"                       when B"01000",
+  XSHIFT_SX  (22 downto  0) & X"00"       & "0"           when B"01001",
+  XSHIFT_SX  (21 downto  0) & X"00"       & "00"          when B"01010",
+  XSHIFT_SX  (20 downto  0) & X"00"       & "000"         when B"01011",
+  XSHIFT_SX  (19 downto  0) & X"000"                      when B"01100",
+  XSHIFT_SX  (18 downto  0) & X"000"      & "0"           when B"01101",
+  XSHIFT_SX  (17 downto  0) & X"000"      & "00"          when B"01110",
+  XSHIFT_SX  (16 downto  0) & X"000"      & "000"         when B"01111",
+  XSHIFT_SX  (15 downto  0) & X"0000"                     when B"10000",
+  XSHIFT_SX  (14 downto  0) & X"0000"     & "0"           when B"10001",
+  XSHIFT_SX  (13 downto  0) & X"0000"     & "00"          when B"10010",
+  XSHIFT_SX  (12 downto  0) & X"0000"     & "000"         when B"10011",
+  XSHIFT_SX  (11 downto  0) & X"00000"                    when B"10100",
+  XSHIFT_SX  (10 downto  0) & X"00000"    & "0"           when B"10101",
+  XSHIFT_SX  (9  downto  0) & X"00000"    & "00"          when B"10110",
+  XSHIFT_SX  (8  downto  0) & X"00000"    & "000"         when B"10111",
+  XSHIFT_SX  (7  downto  0) & X"000000"                   when B"11000",
+  XSHIFT_SX  (6  downto  0) & X"000000"   & "0"           when B"11001",
+  XSHIFT_SX  (5  downto  0) & X"000000"   & "00"          when B"11010",
+  XSHIFT_SX  (4  downto  0) & X"000000"   & "000"         when B"11011",
+  XSHIFT_SX  (3  downto  0) & X"0000000"                  when B"11100",
+  XSHIFT_SX  (2  downto  0) & X"0000000"  & "0"           when B"11101",
+  XSHIFT_SX  (1  downto  0) & X"0000000"  & "00"          when B"11110",
+  XSHIFT_SX  (           0) & X"0000000"  & "000"         when B"11111",
+                              X"00000000"                 when others  ;
+
+with YSHIFT_SX select
+SHRIGHT_SX <=
+                              XSHIFT_SX   (31 downto  0)  when B"00000",
+  SHIFTIN_SX (31          ) & XSHIFT_SX   (31 downto  1)  when B"00001",
+  SHIFTIN_SX (31 downto 30) & XSHIFT_SX   (31 downto  2)  when B"00010",
+  SHIFTIN_SX (31 downto 29) & XSHIFT_SX   (31 downto  3)  when B"00011",
+  SHIFTIN_SX (31 downto 28) & XSHIFT_SX   (31 downto  4)  when B"00100",
+  SHIFTIN_SX (31 downto 27) & XSHIFT_SX   (31 downto  5)  when B"00101",
+  SHIFTIN_SX (31 downto 26) & XSHIFT_SX   (31 downto  6)  when B"00110",
+  SHIFTIN_SX (31 downto 25) & XSHIFT_SX   (31 downto  7)  when B"00111",
+  SHIFTIN_SX (31 downto 24) & XSHIFT_SX   (31 downto  8)  when B"01000",
+  SHIFTIN_SX (31 downto 23) & XSHIFT_SX   (31 downto  9)  when B"01001",
+  SHIFTIN_SX (31 downto 22) & XSHIFT_SX   (31 downto 10)  when B"01010",
+  SHIFTIN_SX (31 downto 21) & XSHIFT_SX   (31 downto 11)  when B"01011",
+  SHIFTIN_SX (31 downto 20) & XSHIFT_SX   (31 downto 12)  when B"01100",
+  SHIFTIN_SX (31 downto 19) & XSHIFT_SX   (31 downto 13)  when B"01101",
+  SHIFTIN_SX (31 downto 18) & XSHIFT_SX   (31 downto 14)  when B"01110",
+  SHIFTIN_SX (31 downto 17) & XSHIFT_SX   (31 downto 15)  when B"01111",
+  SHIFTIN_SX (31 downto 16) & XSHIFT_SX   (31 downto 16)  when B"10000",
+  SHIFTIN_SX (31 downto 15) & XSHIFT_SX   (31 downto 17)  when B"10001",
+  SHIFTIN_SX (31 downto 14) & XSHIFT_SX   (31 downto 18)  when B"10010",
+  SHIFTIN_SX (31 downto 13) & XSHIFT_SX   (31 downto 19)  when B"10011",
+  SHIFTIN_SX (31 downto 12) & XSHIFT_SX   (31 downto 20)  when B"10100",
+  SHIFTIN_SX (31 downto 11) & XSHIFT_SX   (31 downto 21)  when B"10101",
+  SHIFTIN_SX (31 downto 10) & XSHIFT_SX   (31 downto 22)  when B"10110",
+  SHIFTIN_SX (31 downto  9) & XSHIFT_SX   (31 downto 23)  when B"10111",
+  SHIFTIN_SX (31 downto  8) & XSHIFT_SX   (31 downto 24)  when B"11000",
+  SHIFTIN_SX (31 downto  7) & XSHIFT_SX   (31 downto 25)  when B"11001",
+  SHIFTIN_SX (31 downto  6) & XSHIFT_SX   (31 downto 26)  when B"11010",
+  SHIFTIN_SX (31 downto  5) & XSHIFT_SX   (31 downto 27)  when B"11011",
+  SHIFTIN_SX (31 downto  4) & XSHIFT_SX   (31 downto 28)  when B"11100",
+  SHIFTIN_SX (31 downto  3) & XSHIFT_SX   (31 downto 29)  when B"11101",
+  SHIFTIN_SX (31 downto  2) & XSHIFT_SX   (31 downto 30)  when B"11110",
+  SHIFTIN_SX (31 downto  1) & XSHIFT_SX   (          31)  when B"11111",
+  X"00000000"                                             when others  ;
+
+RSHIFT_SX  <= SHLEFT_SX when (A_SLL_SX = '1') else SHRIGHT_SX;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   result out of the logic unit				#
+	-- ### ------------------------------------------------------ ###
+
+RLOGIC_SX  <= XOPER_SX and YOPER_SX when (A_AND_SX = '1') else
+              XOPER_SX xor YOPER_SX when (A_XOR_SX = '1') else
+              XOPER_SX nor YOPER_SX when (A_NOR_SX = '1') else
+              XOPER_SX or  YOPER_SX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   result out of test unit					#
+	-- #								#
+	-- #   the test unit works with either the arithmetic or the	#
+	-- #   logic unit						#
+	-- ### ------------------------------------------------------ ###
+
+X_EQ_Y_SX  <= '1' when (RLOGIC_SX = X"0000_0000") else '0';
+
+X_LT_Y_SX  <=     RARITH_SX (31) xor OVRF_SX;
+X_LTU_Y_SX <= not ARICRY_SX (31)            ;
+
+TESTBIT_SX <=     X_EQ_Y_SX  when (A_EQ_SX = '1') else
+              not X_EQ_Y_SX  when (A_NE_SX = '1') else
+                  X_LT_Y_SX  when (A_LT_SX = '1') else
+                  X_LTU_Y_SX ;
+
+RTEST_SX   <= X"0000_000" & "000" & TESTBIT_SX;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   result out of alu					#
+	-- ### ------------------------------------------------------ ###
+
+RES_SX     <= RARITH_SX   when (A_ARI_SX = '1') else
+              RSHIFT_SX   when (A_SHF_SX = '1') else
+              RTEST_SX    when (A_TST_SX = '1') else
+              RLOGIC_SX   ;
+
+	-- ### ------------------------------------------------------ ###
+	-- ### ------------------------------------------------------ ###
+
+R_EQ_Z_SX  <= '1' when (RES_SX    = X"0000_0000") else '0';
+
+	-- ### ------------------------------------------------------ ###
+	-- #   interrupt request					#
+	-- ### ------------------------------------------------------ ###
+
+ALLINT_XX  <= CAUSE_RX  (15 downto 8) and STATUS_RX (15 downto 8);
+
+INTRQ_XX   <= '0' when (ALLINT_XX = X"00") else STATUS_RX (0);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   arithmetic overflow					#
+	-- ### ------------------------------------------------------ ###
+
+OVRF_SX    <= ARICRY_SX (31) xor ARICRY_SX (30) ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   coprocessor unusable					#
+	-- ### ------------------------------------------------------ ###
+
+CPUNUSE_SX <= USRMOD_SX and not STATUS_RX (28);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   illegal instruction address				#
+	-- ### ------------------------------------------------------ ###
+
+ILLGIAD_SX <= NEXTPC_RX (1) or NEXTPC_RX (0) or (NEXTPC_RX (31) and USRMOD_SX);
+
+	-- ### ------------------------------------------------------ ###
+	-- #   illegal data        address				#
+	-- ### ------------------------------------------------------ ###
+
+ILLGDWA_SX <= DAD_RX    (1) or DAD_RX    (0) or (DAD_RX    (31) and USRMOD_SX);
+ILLGDHA_SX <=                  DAD_RX    (0) or (DAD_RX    (31) and USRMOD_SX);
+ILLGDBA_SX <=                                    DAD_RX    (31) and USRMOD_SX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   instruction bus error					#
+	-- ### ------------------------------------------------------ ###
+
+IABUSER_SX <= M_INS_SX and D_RBERR;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   data bus error						#
+	-- ### ------------------------------------------------------ ###
+
+DABUSER_SX <= M_DAT_SX and ((D_RBERR and M_RED_SX) or
+                            (D_WBERR and M_WRT_SX)   );
+
+
+	-- ### ------------------------------------------------------ ###
+	-- #   exceptions						#
+	-- ### ------------------------------------------------------ ###
+
+OVRF_XX    <= '0'        when (U_EXC_SX = e_clr) else
+              OVRF_SX    when (U_EXC_SX = e_ovr) else
+              '0'        ;
+
+SYSCALL_XX <= '0'        when (U_EXC_SX = e_clr) else
+              '1'        when (U_EXC_SX = e_sys) else
+              '0'        ;
+
+BREAK_XX   <= '0'        when (U_EXC_SX = e_clr) else
+              '1'        when (U_EXC_SX = e_brk) else
+              '0'        ;
+
+ILLGINS_XX <= '0'        when (U_EXC_SX = e_clr) else
+              '1'        when (U_EXC_SX = e_unk) else
+              '0'        ;
+
+CPUNUSE_XX <= '0'        when (U_EXC_SX = e_clr) else
+              CPUNUSE_SX when (U_EXC_SX = e_cop) else
+              '0'        ;
+
+ILLGIAD_XX <= '0'        when (U_EXC_SX = e_clr) else
+              ILLGIAD_SX when (U_EXC_SX = e_iia) else
+              '0'        ;
+
+ILLGLAD_XX <= '0'        when (U_EXC_SX = e_clr) else
+              ILLGDWA_SX when (U_EXC_SX = e_ilw) else
+              ILLGDHA_SX when (U_EXC_SX = e_ilh) else
+              ILLGDBA_SX when (U_EXC_SX = e_ilb) else
+              '0'        ;
+
+ILLGSAD_XX <= '0'        when (U_EXC_SX = e_clr) else
+              ILLGDWA_SX when (U_EXC_SX = e_isw) else
+              ILLGDHA_SX when (U_EXC_SX = e_ish) else
+              ILLGDBA_SX when (U_EXC_SX = e_isb) else
+              '0'        ;
+
+IABUSER_XX <= '0'        when (U_EXC_SX = e_clr) else
+              IABUSER_SX when (U_EXC_SX = e_ibe) else
+              '0'        ;
+
+DABUSER_XX <= '0'        when (U_EXC_SX = e_clr) else
+              DABUSER_SX when (U_EXC_SX = e_dbe) else
+              '0'        ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   exception request					#
+	-- ### ------------------------------------------------------ ###
+
+EXC_XX     <= OVRF_XX                                or
+              SYSCALL_XX or BREAK_XX                 or
+              ILLGINS_XX or CPUNUSE_XX               or
+              ILLGIAD_XX or ILLGLAD_XX or ILLGSAD_XX or
+              IABUSER_XX or DABUSER_XX                 ;
+
+LATEEXC_XX <= IABUSER_XX or DABUSER_XX                 ;
+
+EXCRQ_XX   <= '0' when (U_EXC_SX  = e_clr) else EXC_XX ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   exception code						#
+	-- ### ------------------------------------------------------ ###
+
+EXCCODE_XX <= X"4" when (ILLGIAD_RX = '1') else
+              X"4" when (ILLGLAD_RX = '1') else
+              X"5" when (ILLGSAD_RX = '1') else
+              X"6" when (IABUSER_RX = '1') else
+              X"7" when (DABUSER_RX = '1') else
+              X"8" when (SYSCALL_RX = '1') else
+              X"9" when (BREAK_RX   = '1') else
+              X"a" when (ILLGINS_RX = '1') else
+              X"b" when (CPUNUSE_RX = '1') else
+              X"c" when (OVRF_RX    = '1') else
+              X"0" ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   cause register						#
+	-- ### ------------------------------------------------------ ###
+
+CAUSE_XX   <= "00" & "00"       & X"000" & IT_XX & CAUSE_RX (9 downto 8) &
+              "00" & EXCCODE_XX &  "00"  ;
+
+CAUSE_SX   <= CAUSE_RX (31 downto 16)    & IT_XX & RES_SX   (9 downto 8) &
+              CAUSE_RX ( 7 downto  0)    ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   exception base register					#
+	-- ### ------------------------------------------------------ ###
+
+EBASE_SX   <= "10" & RES_SX (29 downto 12) & "00" & cpu_nbr ;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign registers :					#
+	-- #   software visible registers				#
+	-- #								#
+	-- #     - integer registers					#
+	-- #								#
+	-- #     - LO      register					#
+	-- #     - HI      register					#
+	-- #								#
+	-- #     - Exception Program       Counter			#
+	-- #     - Error Exception Program Counter			#
+	-- #     - Status                  register			#
+	-- #     - Cause                   register			#
+	-- #     - Exception Base          register			#
+	-- #     - Bad Virtual Address     register			#
+	-- ### ------------------------------------------------------ ###
+
+SOFTWARE_REG : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  R1_RX      <= guarded RES_SX   when (R_IDR_SX ( 1) = '1') else R1_RX    ;
+  R2_RX      <= guarded RES_SX   when (R_IDR_SX ( 2) = '1') else R2_RX    ;
+  R3_RX      <= guarded RES_SX   when (R_IDR_SX ( 3) = '1') else R3_RX    ;
+  R4_RX      <= guarded RES_SX   when (R_IDR_SX ( 4) = '1') else R4_RX    ;
+  R5_RX      <= guarded RES_SX   when (R_IDR_SX ( 5) = '1') else R5_RX    ;
+  R6_RX      <= guarded RES_SX   when (R_IDR_SX ( 6) = '1') else R6_RX    ;
+  R7_RX      <= guarded RES_SX   when (R_IDR_SX ( 7) = '1') else R7_RX    ;
+  R8_RX      <= guarded RES_SX   when (R_IDR_SX ( 8) = '1') else R8_RX    ;
+  R9_RX      <= guarded RES_SX   when (R_IDR_SX ( 9) = '1') else R9_RX    ;
+  R10_RX     <= guarded RES_SX   when (R_IDR_SX (10) = '1') else R10_RX   ;
+  R11_RX     <= guarded RES_SX   when (R_IDR_SX (11) = '1') else R11_RX   ;
+  R12_RX     <= guarded RES_SX   when (R_IDR_SX (12) = '1') else R12_RX   ;
+  R13_RX     <= guarded RES_SX   when (R_IDR_SX (13) = '1') else R13_RX   ;
+  R14_RX     <= guarded RES_SX   when (R_IDR_SX (14) = '1') else R14_RX   ;
+  R15_RX     <= guarded RES_SX   when (R_IDR_SX (15) = '1') else R15_RX   ;
+  R16_RX     <= guarded RES_SX   when (R_IDR_SX (16) = '1') else R16_RX   ;
+  R17_RX     <= guarded RES_SX   when (R_IDR_SX (17) = '1') else R17_RX   ;
+  R18_RX     <= guarded RES_SX   when (R_IDR_SX (18) = '1') else R18_RX   ;
+  R19_RX     <= guarded RES_SX   when (R_IDR_SX (19) = '1') else R19_RX   ;
+  R20_RX     <= guarded RES_SX   when (R_IDR_SX (20) = '1') else R20_RX   ;
+  R21_RX     <= guarded RES_SX   when (R_IDR_SX (21) = '1') else R21_RX   ;
+  R22_RX     <= guarded RES_SX   when (R_IDR_SX (22) = '1') else R22_RX   ;
+  R23_RX     <= guarded RES_SX   when (R_IDR_SX (23) = '1') else R23_RX   ;
+  R24_RX     <= guarded RES_SX   when (R_IDR_SX (24) = '1') else R24_RX   ;
+  R25_RX     <= guarded RES_SX   when (R_IDR_SX (25) = '1') else R25_RX   ;
+  R26_RX     <= guarded RES_SX   when (R_IDR_SX (26) = '1') else R26_RX   ;
+  R27_RX     <= guarded RES_SX   when (R_IDR_SX (27) = '1') else R27_RX   ;
+  R28_RX     <= guarded RES_SX   when (R_IDR_SX (28) = '1') else R28_RX   ;
+  R29_RX     <= guarded RES_SX   when (R_IDR_SX (29) = '1') else R29_RX   ;
+  R30_RX     <= guarded RES_SX   when (R_IDR_SX (30) = '1') else R30_RX   ;
+  R31_RX     <= guarded RES_SX   when (R_IDR_SX (31) = '1') else R31_RX   ;
+
+  LO_RX      <= guarded RES_SX   when (R_LO_SX       = '1') else LO_RX    ;
+  HI_RX      <= guarded RES_SX   when (R_HI_SX       = '1') else HI_RX    ;
+
+  EPC_RX     <= guarded RES_SX   when (R_EPC_SX      = '1') else EPC_RX   ;
+  EEPC_RX    <= guarded RES_SX   when (R_EEP_SX      = '1') else EEPC_RX  ;
+  STATUS_RX  <= guarded RES_SX   when (R_SR_SX       = '1') else STATUS_RX;
+  BADVA_RX   <= guarded RES_SX   when (R_BVA_SX      = '1') else BADVA_RX ;
+
+  EBASE_RX   <= guarded EBASE_SX when (R_EBS_SX      = '1') else EBASE_RX ;
+
+  CAUSE_RX   <= guarded CAUSE_XX when (R_XCR_SX      = '1') else
+                        CAUSE_SX when (R_CR_SX       = '1') else
+                        CAUSE_RX ;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign registers :					#
+	-- #   firmware visible registers				#
+	-- #								#
+	-- #     - data address  register				#
+	-- #     - output data   register				#
+	-- #     - program       counter				#
+	-- #     - input data    register				#
+	-- #     - instruction   register				#
+	-- ### ------------------------------------------------------ ###
+
+FIRMWARE_REG : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  DAD_RX     <= guarded RES_SX     when (R_DAD_SX      = '1') else DAD_RX    ;
+  DOUT_RX    <= guarded RES_SX     when (R_DOT_SX      = '1') else DOUT_RX   ;
+  NEXTPC_RX  <= guarded RES_SX     when (R_NPC_SX      = '1') else NEXTPC_RX ;
+
+  I_RX       <= guarded DIN_SX     when (M_IR_SX       = '1') else I_RX      ;
+  DIN_RX     <= guarded DIN_SX     when (M_DIN_SX      = '1') else DIN_RX    ;
+  PC_RX      <= guarded NEXTPC_RX  when (M_PC_SX       = '1') else PC_RX     ;
+
+  AD_RX      <= guarded AD_SX      when (E_AD_SX       = '1') else AD_RX     ;
+
+  EQZ_RX     <= guarded R_EQ_Z_SX  when (FWAXWE_SX     = '1') else EQZ_RX    ;
+  LT_RX      <= guarded X_LT_Y_SX  when (FWAXWE_SX     = '1') else LT_RX     ;
+  LTU_RX     <= guarded X_LTU_Y_SX when (FWAXWE_SX     = '1') else LTU_RX    ;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign registers :					#
+	-- #   hardware visible registers				#
+	-- #								#
+	-- #     - exception request					#
+	-- #     - interrupt request					#
+	-- #								#
+	-- #     - overflow						#
+	-- #     - syscall						#
+	-- #     - break						#
+	-- #     - illegal instruction					#
+	-- #     - coprocessor unusable					#
+	-- #     - illegal instruction address				#
+	-- #     - illegal load        address				#
+	-- #     - illegal store       address				#
+	-- #     - instruction bus error				#
+	-- #     - data        bus error				#
+	-- ### ------------------------------------------------------ ###
+
+HARDWARE_REG : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  EXCRQ_RX   <= guarded EXCRQ_XX   when (EXCWE_XX = '1') else EXCRQ_RX  ;
+  INTRQ_RX   <= guarded INTRQ_XX   when (EXCWE_XX = '1') else INTRQ_RX  ;
+
+  OVRF_RX    <= guarded OVRF_XX    when (EXCWE_XX = '1') else OVRF_RX   ;
+  SYSCALL_RX <= guarded SYSCALL_XX when (EXCWE_XX = '1') else SYSCALL_RX;
+  BREAK_RX   <= guarded BREAK_XX   when (EXCWE_XX = '1') else BREAK_RX  ;
+  ILLGINS_RX <= guarded ILLGINS_XX when (EXCWE_XX = '1') else ILLGINS_RX;
+  CPUNUSE_RX <= guarded CPUNUSE_XX when (EXCWE_XX = '1') else CPUNUSE_RX;
+  ILLGIAD_RX <= guarded ILLGIAD_XX when (EXCWE_XX = '1') else ILLGIAD_RX;
+  ILLGLAD_RX <= guarded ILLGLAD_XX when (EXCWE_XX = '1') else ILLGLAD_RX;
+  ILLGSAD_RX <= guarded ILLGSAD_XX when (EXCWE_XX = '1') else ILLGSAD_RX;
+  IABUSER_RX <= guarded IABUSER_XX when (EXCWE_XX = '1') else IABUSER_RX;
+  DABUSER_RX <= guarded DABUSER_XX when (EXCWE_XX = '1') else DABUSER_RX;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign registers :					#
+	-- #     - micro instruction   register				#
+	-- ### ------------------------------------------------------ ###
+
+MICRO_INSTRUCTION_REG : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  UINS_RX    <= guarded UINS_SX  when (UIWE_SX       = '1') else UINS_RX  ;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign registers :					#
+	-- #     - miscellaneous					#
+	-- ### ------------------------------------------------------ ###
+
+MISC : block (CK_SX = '1' and not CK_SX'STABLE)
+begin
+
+  RESET_RX   <= guarded not RESET_N;
+
+end block;
+
+	-- ### ------------------------------------------------------ ###
+	-- #   assign outputs						#
+	-- ### ------------------------------------------------------ ###
+
+D_A        <=     DA_SX     (31 downto 2) ;
+D_BYTSEL   <=     BYTSEL_SX               ;
+D_RQ       <=     M_ACS_SX                ;
+D_RW       <= not M_WRT_SX                ;
+D_MODE     <=     MODE_SX                 ;
+D_SYNC     <=     '0'                     ;
+D_REG      <=     M_XRG_SX                ;
+D_LINKED   <=     M_LKD_SX                ;
+D_RSTLKD   <=     M_RLK_SX                ;
+D_OUT      <=     DOUT_SX                 ;
+D_ACK      <=     '1'                     ;
+
+SCOUT      <=     '0'                     ;
+
+end;

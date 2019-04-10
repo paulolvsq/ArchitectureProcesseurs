@@ -1,0 +1,30 @@
+
+-- ### -------------------------------------------------------------- ###
+-- # file	: c_sr1k_8b.vbe						#
+-- # date	: Nov 10 1995						#
+-- # author	: P. Bazargan Sabet					#
+-- # content	: a 1 KByte static ram with a negative logic chip	#
+-- #		  select pin						#
+-- ### -------------------------------------------------------------- ###
+
+entity C_SR1K_8B is
+
+  port (
+       E_N : in    bit                         ;	-- chip select
+       W_N : in    bit                         ;	-- write enable
+       DAT : inout mux_vector ( 7 downto 0) bus;	-- data
+       ADR : in    bit_vector ( 9 downto 0)    ;	-- address
+       VDD : in    bit                         ;
+       VSS : in    bit
+       );
+
+end C_SR1K_8B;
+
+	-- ### ------------------------------------------------------ ###
+	-- #  C architecture (See c_sr1k_8b.c file)			#
+	-- ### ------------------------------------------------------ ###
+
+architecture C of C_SR1K_8B is
+begin
+end ;
+
