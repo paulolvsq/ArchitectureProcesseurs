@@ -1,0 +1,19 @@
+.data 
+
+	a : .word 5
+	b : .word 25
+
+.text	
+	
+pgcd : 
+
+	ori	r2	r4	0
+	j 	main
+	
+while :
+	
+	bne	r4	r5	
+	
+
+	
+		
